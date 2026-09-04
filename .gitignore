@@ -1,0 +1,18 @@
+# Dependencies and test output
+node_modules/
+coverage/
+
+# Logs
+*.log
+npm-debug.log*
+
+# Editors and operating systems
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Local exports and backups
+*_交易流水.csv
+A股做T成本簿_备份_*.json
+*.zip

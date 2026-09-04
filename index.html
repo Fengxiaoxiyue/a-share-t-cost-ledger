@@ -1,0 +1,211 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="A 股小额做 T 交易、FIFO 闭环收益与摊薄持仓成本跟踪工具" />
+    <title>A 股做 T 成本簿</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand">
+        <div class="brand-mark" aria-hidden="true">T</div>
+        <div>
+          <h1>A 股做 T 成本簿</h1>
+          <p>FIFO 闭环 · 摊薄持仓成本 · 本地保存</p>
+        </div>
+      </div>
+      <div class="top-actions">
+        <button class="button ghost" id="backupButton">备份与恢复</button>
+        <button class="button ghost" id="feeButton">费率设置</button>
+      </div>
+    </header>
+
+    <main class="app-shell">
+      <section class="security-strip" aria-label="股票选择">
+        <div class="security-picker">
+          <label for="securitySelect">当前股票</label>
+          <select id="securitySelect" aria-label="选择股票"></select>
+          <span class="market-badge" id="marketBadge">—</span>
+        </div>
+        <div class="security-actions">
+          <button class="button subtle" id="editSecurityButton">编辑股票</button>
+          <button class="button primary" id="addSecurityButton">＋ 添加股票</button>
+        </div>
+      </section>
+
+      <section id="emptyState" class="empty-state" hidden>
+        <div class="empty-icon">↗</div>
+        <h2>先添加一只股票</h2>
+        <p>设置初始仓位和初始持仓成本后，就可以开始记录每笔做 T 交易。</p>
+        <button class="button primary" id="emptyAddButton">添加第一只股票</button>
+      </section>
+
+      <div id="workspace" hidden>
+        <section class="summary-grid" aria-label="账户摘要">
+          <article class="metric-card featured">
+            <div class="metric-label">当前摊薄成本 <span class="info" title="初始持仓总成本 + 累计买入支出 − 累计卖出净收入，再除以当前持仓。">?</span></div>
+            <div class="metric-value" id="dilutedCost">—</div>
+            <div class="metric-foot" id="costChange">—</div>
+          </article>
+          <article class="metric-card">
+            <div class="metric-label">当前持仓</div>
+            <div class="metric-value" id="currentHolding">—</div>
+            <div class="metric-foot" id="holdingDifference">—</div>
+          </article>
+          <article class="metric-card">
+            <div class="metric-label">组合仓位占比 <span class="info" title="当前股票估算市值 ÷ 已添加全部股票的估算持仓总市值。估值采用各股票最新成交价，无交易时采用初始成本价。">?</span></div>
+            <div class="metric-value" id="portfolioWeight">—</div>
+            <div class="metric-foot" id="portfolioWeightDetail">—</div>
+          </article>
+          <article class="metric-card">
+            <div class="metric-label">已闭环净收益</div>
+            <div class="metric-value" id="closedProfit">—</div>
+            <div class="metric-foot" id="loopCount">—</div>
+          </article>
+          <article class="metric-card">
+            <div class="metric-label">累计交易费用</div>
+            <div class="metric-value" id="totalFees">—</div>
+            <div class="metric-foot" id="feeHint">—</div>
+          </article>
+        </section>
+
+        <section class="panel trade-entry-panel">
+          <div class="panel-heading">
+            <div>
+              <span class="eyebrow">快速记账</span>
+              <h2 id="tradeFormTitle">录入一笔交易</h2>
+            </div>
+            <span class="save-status" id="saveStatus">数据自动保存在本机</span>
+          </div>
+          <form id="tradeForm" class="trade-form">
+            <input type="hidden" id="editingTradeId" />
+            <label>
+              <span>交易时间</span>
+              <input type="datetime-local" id="tradeDatetime" required />
+            </label>
+            <fieldset class="side-field">
+              <legend>方向</legend>
+              <div class="segmented">
+                <label><input type="radio" name="side" value="buy" checked /><span>买入</span></label>
+                <label><input type="radio" name="side" value="sell" /><span>卖出</span></label>
+              </div>
+            </fieldset>
+            <label>
+              <span>成交数量（股）</span>
+              <input type="number" id="tradeQuantity" min="100" step="100" value="100" required />
+            </label>
+            <label>
+              <span>成交价格（元）</span>
+              <input type="number" id="tradePrice" min="0.001" step="0.001" placeholder="0.000" required />
+            </label>
+            <label class="note-field">
+              <span>备注（可选）</span>
+              <input type="text" id="tradeNote" maxlength="50" placeholder="例如：盘中回补" />
+            </label>
+            <div class="trade-preview" id="tradePreview">输入价格后显示预估费用</div>
+            <div class="form-actions">
+              <button type="button" class="button ghost" id="cancelEditButton" hidden>取消编辑</button>
+              <button type="submit" class="button primary">保存交易</button>
+            </div>
+            <p class="form-error" id="tradeError" role="alert"></p>
+          </form>
+        </section>
+
+        <section class="charts-grid">
+          <article class="panel chart-panel">
+            <div class="panel-heading compact">
+              <div><span class="eyebrow">成本轨迹</span><h2>价格与摊薄成本</h2></div>
+              <div class="legend"><span class="dot cost"></span>摊薄成本 <span class="dot price"></span>成交价</div>
+            </div>
+            <div class="chart" id="costChart" aria-label="价格与摊薄成本折线图"></div>
+          </article>
+          <article class="panel chart-panel">
+            <div class="panel-heading compact">
+              <div><span class="eyebrow">仓位与收益</span><h2>仓位偏差 / 累计闭环收益</h2></div>
+            </div>
+            <div class="chart" id="positionChart" aria-label="仓位偏差与累计闭环收益图"></div>
+          </article>
+        </section>
+
+        <section class="panel">
+          <div class="panel-heading table-heading">
+            <div><span class="eyebrow">自动配对</span><h2>FIFO 闭环收益</h2></div>
+            <div class="queue-status" id="queueStatus">—</div>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>开仓时间</th><th>闭环时间</th><th>方向</th><th class="number">数量</th><th class="number">买入全成本</th><th class="number">卖出净价</th><th class="number">净收益</th><th class="number">折合降本</th></tr></thead>
+              <tbody id="loopsBody"></tbody>
+            </table>
+          </div>
+          <div class="table-empty" id="loopsEmpty">出现方向相反的交易后，系统会按时间优先、数量优先自动形成闭环。</div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-heading table-heading">
+            <div><span class="eyebrow">完整明细</span><h2>交易流水</h2></div>
+            <div class="table-tools">
+              <select id="sideFilter" aria-label="方向筛选"><option value="all">全部方向</option><option value="buy">仅买入</option><option value="sell">仅卖出</option></select>
+              <button class="button subtle" id="exportCsvButton">导出 CSV</button>
+            </div>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>交易时间</th><th>方向</th><th class="number">数量</th><th class="number">成交价</th><th class="number">成交额</th><th class="number">费用</th><th class="number">交易后持仓</th><th class="number">较初始</th><th class="number">摊薄成本</th><th>备注</th><th>操作</th></tr></thead>
+              <tbody id="transactionsBody"></tbody>
+            </table>
+          </div>
+          <div class="table-empty" id="transactionsEmpty">还没有交易记录，从上方录入第一笔吧。</div>
+        </section>
+      </div>
+    </main>
+
+    <dialog id="securityDialog">
+      <form method="dialog" id="securityForm" class="dialog-form">
+        <div class="dialog-heading"><div><span class="eyebrow">标的设置</span><h2 id="securityDialogTitle">添加股票</h2></div><button type="button" class="icon-button" data-close="securityDialog" aria-label="关闭">×</button></div>
+        <input type="hidden" id="securityId" />
+        <div class="form-grid">
+          <label><span>股票代码</span><input id="securityCode" inputmode="numeric" maxlength="6" placeholder="例如 600519" required /></label>
+          <label><span>股票简称</span><input id="securityName" maxlength="12" placeholder="例如 贵州茅台" required /></label>
+          <label><span>初始持仓（股）</span><input type="number" id="initialQuantity" min="0" step="100" placeholder="1000" required /></label>
+          <label><span>初始持仓成本（元/股）</span><input type="number" id="initialCost" min="0" step="0.001" placeholder="10.000" required /></label>
+        </div>
+        <p class="dialog-note">初始仓位作为基准，不参与 FIFO 配对；后续可修改并自动重算。</p>
+        <p class="form-error" id="securityError" role="alert"></p>
+        <div class="dialog-actions"><button type="button" class="button danger" id="deleteSecurityButton" hidden>删除股票</button><span class="spacer"></span><button type="button" data-close="securityDialog" class="button ghost">取消</button><button type="submit" class="button primary">保存</button></div>
+      </form>
+    </dialog>
+
+    <dialog id="feeDialog">
+      <form method="dialog" id="feeForm" class="dialog-form">
+        <div class="dialog-heading"><div><span class="eyebrow">全局参数</span><h2>交易费率</h2></div><button type="button" class="icon-button" data-close="feeDialog" aria-label="关闭">×</button></div>
+        <div class="fee-list">
+          <label><div><strong>全佣</strong><small>买入、卖出均收</small></div><div class="rate-input"><input type="number" id="commissionWan" min="0" step="0.01" required /><span>万分之</span></div></label>
+          <label><div><strong>最低佣金</strong><small>不足此金额按此金额计</small></div><div class="rate-input"><input type="number" id="minimumCommission" min="0" step="0.01" required /><span>元</span></div></label>
+          <label><div><strong>过户费</strong><small>买入、卖出均收</small></div><div class="rate-input"><input type="number" id="transferWan" min="0" step="0.01" required /><span>万分之</span></div></label>
+          <label><div><strong>印花税</strong><small>仅卖出时收取</small></div><div class="rate-input"><input type="number" id="stampWan" min="0" step="0.01" required /><span>万分之</span></div></label>
+        </div>
+        <p class="dialog-note">默认值：全佣万一、最低 5 元、过户费万分之 0.1、印花税万五。每笔费用按分四舍五入。</p>
+        <div class="dialog-actions"><span class="spacer"></span><button type="button" data-close="feeDialog" class="button ghost">取消</button><button type="submit" class="button primary">保存并重算</button></div>
+      </form>
+    </dialog>
+
+    <dialog id="backupDialog">
+      <div class="dialog-form">
+        <div class="dialog-heading"><div><span class="eyebrow">数据安全</span><h2>备份与恢复</h2></div><button class="icon-button" id="closeBackupButton" aria-label="关闭">×</button></div>
+        <div class="backup-grid">
+          <button class="backup-card" id="exportJsonButton"><span class="backup-icon">↓</span><strong>导出完整备份</strong><small>股票、流水和费率一并保存为 JSON</small></button>
+          <button class="backup-card" id="importJsonButton"><span class="backup-icon">↑</span><strong>恢复备份</strong><small>从本工具导出的 JSON 文件恢复</small></button>
+        </div>
+        <input type="file" id="importFile" accept="application/json,.json" hidden />
+        <p class="dialog-note">数据只保存在当前浏览器中。建议每次集中录入后导出一份备份。</p>
+      </div>
+    </dialog>
+
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+    <script src="engine.js"></script>
+    <script src="app.js"></script>
+  </body>
+</html>
