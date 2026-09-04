@@ -41,7 +41,16 @@
     });
   }
 
-  function analyzeSecurity(security, transactions, feeSettings) {
+  function transactionType(transaction) {
+    if (transaction.type === "dividend" || transaction.type === "dividend_tax") return transaction.type;
+    return "trade";
+  }
+
+  function emptyFees() {
+    return { gross: 0, commission: 0, transferFee: 0, stampDuty: 0, total: 0, cashFlow: 0 };
+  }
+
+  function analyzeSecurity(security, transactions, feeSettings, options = {}) {
     const relevant = sortTransactions(
       transactions.filter((item) => item.securityId === security.id)
     );
@@ -51,11 +60,41 @@
     let costBalance = initialQuantity * initialCost;
     let cumulativeClosedProfit = 0;
     let cumulativeFees = 0;
+    let cumulativeDividend = 0;
+    let cumulativeDividendTax = 0;
+    const includeDividendsInCost = Boolean(options.includeDividendsInCost);
     const openLots = { buy: [], sell: [] };
     const loops = [];
     const rows = [];
 
     relevant.forEach((transaction) => {
+      const entryType = transactionType(transaction);
+      if (entryType !== "trade") {
+        const amount = roundMoney(Number(transaction.amount));
+        if (entryType === "dividend") cumulativeDividend = roundMoney(cumulativeDividend + amount);
+        else cumulativeDividendTax = roundMoney(cumulativeDividendTax + amount);
+
+        if (includeDividendsInCost) {
+          costBalance += entryType === "dividend_tax" ? amount : -amount;
+        }
+
+        rows.push({
+          ...transaction,
+          entryType,
+          amount,
+          fees: emptyFees(),
+          holdingAfter: holding,
+          holdingDifference: holding - initialQuantity,
+          costBalanceAfter: roundNumber(costBalance),
+          dilutedCostAfter: holding > 0 ? roundNumber(costBalance / holding) : null,
+          cumulativeClosedProfit: roundNumber(cumulativeClosedProfit),
+          cumulativeDividend,
+          cumulativeDividendTax,
+          netDividend: roundMoney(cumulativeDividend - cumulativeDividendTax),
+        });
+        return;
+      }
+
       const quantity = Number(transaction.quantity);
       const price = Number(transaction.price);
       const fees = calculateFees(transaction, feeSettings);
@@ -111,12 +150,16 @@
 
       rows.push({
         ...transaction,
+        entryType,
         fees,
         holdingAfter: holding,
         holdingDifference: holding - initialQuantity,
         costBalanceAfter: roundNumber(costBalance),
         dilutedCostAfter: holding > 0 ? roundNumber(costBalance / holding) : null,
         cumulativeClosedProfit: roundNumber(cumulativeClosedProfit),
+        cumulativeDividend,
+        cumulativeDividendTax,
+        netDividend: roundMoney(cumulativeDividend - cumulativeDividendTax),
       });
     });
 
@@ -135,8 +178,19 @@
       costReduction: holding > 0 ? roundNumber(initialCost - costBalance / holding) : null,
       cumulativeClosedProfit: roundNumber(cumulativeClosedProfit),
       cumulativeFees,
+      cumulativeDividend,
+      cumulativeDividendTax,
+      netDividend: roundMoney(cumulativeDividend - cumulativeDividendTax),
+      includeDividendsInCost,
       unmatched,
     };
+  }
+
+  function validateCashEntry(candidate) {
+    if (!candidate.datetime) return "请选择记录时间";
+    const amount = Number(candidate.amount);
+    if (!Number.isFinite(amount) || amount <= 0) return "金额必须大于 0";
+    return "";
   }
 
   function validateTrade(security, transactions, candidate, editingId) {
@@ -153,16 +207,17 @@
       .concat(candidate);
     let holding = Number(security.initialQuantity) || 0;
     for (const item of sortTransactions(next)) {
+      if (transactionType(item) !== "trade") continue;
       holding += item.side === "buy" ? Number(item.quantity) : -Number(item.quantity);
       if (holding < 0) return "该交易会使历史持仓变为负数，请检查时间或数量";
     }
     return "";
   }
 
-  function calculatePortfolioAllocation(securities, transactions, feeSettings, selectedSecurityId) {
+  function calculatePortfolioAllocation(securities, transactions, feeSettings, selectedSecurityId, options = {}) {
     const positions = securities.map((security) => {
-      const analysis = analyzeSecurity(security, transactions, feeSettings);
-      const latestRow = analysis.rows[analysis.rows.length - 1];
+      const analysis = analyzeSecurity(security, transactions, feeSettings, options);
+      const latestRow = [...analysis.rows].reverse().find((row) => row.entryType === "trade");
       const valuationPrice = latestRow ? Number(latestRow.price) : Number(security.initialCost);
       const marketValue = Math.max(0, analysis.currentHolding) * Math.max(0, valuationPrice || 0);
       return { securityId: security.id, marketValue };
@@ -182,6 +237,8 @@
     calculateFees,
     roundMoney,
     sortTransactions,
+    transactionType,
+    validateCashEntry,
     validateTrade,
   };
 });

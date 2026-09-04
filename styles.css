@@ -75,6 +75,8 @@ button { cursor: pointer; }
 .button.ghost { border: 1px solid var(--line); background: white; color: var(--navy-800); }
 .topbar .button.ghost { border-color: #31506d; background: #102943; color: #e9f3fc; }
 .button.subtle { background: #dfe9f2; color: var(--navy-800); }
+.button.dividend-mode { border: 1px solid #b9c9d8; background: white; color: var(--navy-800); }
+.button.dividend-mode.active { border-color: #6eb9a9; color: #0d766a; background: #eaf8f5; }
 .button.danger { color: #a33131; background: var(--buy-soft); border: 1px solid #f2cdca; }
 
 select, input {
@@ -83,7 +85,7 @@ select, input {
 }
 select:focus, input:focus { border-color: var(--blue-500); box-shadow: 0 0 0 3px rgba(33,134,223,.11); }
 
-.summary-grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px; margin-bottom: 12px; }
+.summary-grid { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 12px; margin-bottom: 12px; }
 .metric-card {
   background: var(--paper); border: 1px solid var(--line); border-radius: 12px; padding: 18px 20px;
   box-shadow: 0 2px 12px rgba(25, 52, 79, .035); min-width: 0;
@@ -107,16 +109,19 @@ select:focus, input:focus { border-color: var(--blue-500); box-shadow: 0 0 0 3px
 .save-status, .queue-status { color: var(--muted); font-size: 12px; }
 
 .trade-entry-panel { border-top: 3px solid var(--blue-600); }
-.trade-form { display: grid; grid-template-columns: 1.15fr .8fr .9fr .9fr 1.2fr; gap: 12px; padding: 0 20px 18px; align-items: end; }
+.trade-form { display: grid; grid-template-columns: 1.15fr 1.5fr .9fr .9fr 1.2fr; gap: 12px; padding: 0 20px 18px; align-items: end; }
 .trade-form label > span, .trade-form legend, .form-grid label > span { display: block; margin-bottom: 6px; color: #506075; font-size: 11px; font-weight: 700; }
 .side-field { min-width: 0; margin: 0; padding: 0; border: 0; }
 .segmented { display: grid; grid-template-columns: 1fr 1fr; border: 1px solid #cbd7e2; border-radius: 8px; overflow: hidden; }
+.segmented.entry-types { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 .segmented label { margin: 0; }
 .segmented input { position: absolute; opacity: 0; pointer-events: none; }
 .segmented span { display: grid !important; place-items: center; min-height: 38px; margin: 0 !important; background: white; cursor: pointer; }
-.segmented label:first-child span { border-right: 1px solid #d8e0e8; }
+.segmented label:not(:last-child) span { border-right: 1px solid #d8e0e8; }
 .segmented input[value="buy"]:checked + span { color: var(--buy); background: var(--buy-soft); }
 .segmented input[value="sell"]:checked + span { color: var(--sell); background: var(--sell-soft); }
+.segmented input[value="dividend"]:checked + span { color: #9a620b; background: #fff7e8; }
+.segmented input[value="dividend_tax"]:checked + span { color: #8e4a17; background: #fff1e8; }
 .trade-preview { grid-column: 1 / 5; color: var(--muted); font-size: 12px; min-height: 18px; align-self: center; }
 .form-actions { grid-column: 5; display: flex; justify-content: end; gap: 8px; }
 .form-error { grid-column: 1 / -1; min-height: 0; margin: 0; color: var(--buy); font-size: 12px; }
@@ -151,6 +156,8 @@ tbody tr:hover { background: #f8fbfd; }
 .side-tag { display: inline-block; min-width: 42px; padding: 3px 8px; border-radius: 5px; font-weight: 700; text-align: center; }
 .side-tag.buy { color: var(--buy); background: var(--buy-soft); }
 .side-tag.sell { color: var(--sell); background: var(--sell-soft); }
+.side-tag.dividend { color: #9a620b; background: #fff7e8; }
+.side-tag.dividend_tax { color: #8e4a17; background: #fff1e8; }
 .table-action { border: 0; background: transparent; color: var(--blue-600); padding: 3px 5px; font-size: 11px; }
 .table-action.delete { color: #b34545; }
 .table-empty { padding: 28px 20px; color: #8795a5; text-align: center; font-size: 12px; }
@@ -206,7 +213,9 @@ dialog::backdrop { background: rgba(5,18,32,.55); backdrop-filter: blur(2px); }
   .security-picker { flex-wrap: wrap; }
   .security-picker select { flex: 1; min-width: 170px; }
   .security-actions { justify-content: stretch; }
+  .security-actions { flex-wrap: wrap; }
   .security-actions .button { flex: 1; }
+  .security-actions .dividend-mode { flex-basis: 100%; }
   .summary-grid { grid-template-columns: 1fr 1fr; gap: 8px; }
   .metric-card { padding: 14px; }
   .metric-card.featured { padding-left: 11px; }

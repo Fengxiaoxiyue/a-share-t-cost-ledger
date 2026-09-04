@@ -30,6 +30,7 @@
           <span class="market-badge" id="marketBadge">—</span>
         </div>
         <div class="security-actions">
+          <button class="button dividend-mode" id="dividendModeButton" type="button" aria-pressed="false" title="切换现金分红和股息红利税是否回摊至当前持仓成本">股息模式：不计入成本</button>
           <button class="button subtle" id="editSecurityButton">编辑股票</button>
           <button class="button primary" id="addSecurityButton">＋ 添加股票</button>
         </div>
@@ -45,7 +46,7 @@
       <div id="workspace" hidden>
         <section class="summary-grid" aria-label="账户摘要">
           <article class="metric-card featured">
-            <div class="metric-label">当前摊薄成本 <span class="info" title="初始持仓总成本 + 累计买入支出 − 累计卖出净收入，再除以当前持仓。">?</span></div>
+            <div class="metric-label">当前摊薄成本 <span class="info" id="dilutedCostHelp" title="初始持仓总成本 + 累计买入支出 − 累计卖出净收入，再除以当前持仓。">?</span></div>
             <div class="metric-value" id="dilutedCost">—</div>
             <div class="metric-foot" id="costChange">—</div>
           </article>
@@ -69,36 +70,47 @@
             <div class="metric-value" id="totalFees">—</div>
             <div class="metric-foot" id="feeHint">—</div>
           </article>
+          <article class="metric-card">
+            <div class="metric-label">累计净股息 <span class="info" title="现金分红入账减去已补扣的股息红利税。">?</span></div>
+            <div class="metric-value" id="netDividend">—</div>
+            <div class="metric-foot" id="dividendHint">—</div>
+          </article>
         </section>
 
         <section class="panel trade-entry-panel">
           <div class="panel-heading">
             <div>
               <span class="eyebrow">快速记账</span>
-              <h2 id="tradeFormTitle">录入一笔交易</h2>
+              <h2 id="tradeFormTitle">录入一笔记录</h2>
             </div>
             <span class="save-status" id="saveStatus">数据自动保存在本机</span>
           </div>
           <form id="tradeForm" class="trade-form">
             <input type="hidden" id="editingTradeId" />
             <label>
-              <span>交易时间</span>
+              <span>记录时间</span>
               <input type="datetime-local" id="tradeDatetime" required />
             </label>
             <fieldset class="side-field">
-              <legend>方向</legend>
-              <div class="segmented">
-                <label><input type="radio" name="side" value="buy" checked /><span>买入</span></label>
-                <label><input type="radio" name="side" value="sell" /><span>卖出</span></label>
+              <legend>记录类型</legend>
+              <div class="segmented entry-types">
+                <label><input type="radio" name="entryType" value="buy" checked /><span>买入</span></label>
+                <label><input type="radio" name="entryType" value="sell" /><span>卖出</span></label>
+                <label><input type="radio" name="entryType" value="dividend" /><span>分红</span></label>
+                <label><input type="radio" name="entryType" value="dividend_tax" /><span>红利税</span></label>
               </div>
             </fieldset>
-            <label>
+            <label class="trade-only">
               <span>成交数量（股）</span>
               <input type="number" id="tradeQuantity" min="100" step="100" value="100" required />
             </label>
-            <label>
+            <label class="trade-only">
               <span>成交价格（元）</span>
-              <input type="number" id="tradePrice" min="0.001" step="0.001" placeholder="0.000" required />
+              <input type="number" id="tradePrice" min="0.0001" step="0.0001" placeholder="0.0000" required />
+            </label>
+            <label class="cash-only" hidden>
+              <span id="cashAmountLabel">入账金额（元）</span>
+              <input type="number" id="cashAmount" min="0.01" step="0.01" placeholder="0.00" />
             </label>
             <label class="note-field">
               <span>备注（可选）</span>
@@ -107,7 +119,7 @@
             <div class="trade-preview" id="tradePreview">输入价格后显示预估费用</div>
             <div class="form-actions">
               <button type="button" class="button ghost" id="cancelEditButton" hidden>取消编辑</button>
-              <button type="submit" class="button primary">保存交易</button>
+              <button type="submit" class="button primary" id="saveEntryButton">保存记录</button>
             </div>
             <p class="form-error" id="tradeError" role="alert"></p>
           </form>
@@ -145,19 +157,19 @@
 
         <section class="panel">
           <div class="panel-heading table-heading">
-            <div><span class="eyebrow">完整明细</span><h2>交易流水</h2></div>
+            <div><span class="eyebrow">完整明细</span><h2>交易与股息流水</h2></div>
             <div class="table-tools">
-              <select id="sideFilter" aria-label="方向筛选"><option value="all">全部方向</option><option value="buy">仅买入</option><option value="sell">仅卖出</option></select>
+              <select id="sideFilter" aria-label="类型筛选"><option value="all">全部类型</option><option value="buy">仅买入</option><option value="sell">仅卖出</option><option value="dividend">仅分红</option><option value="dividend_tax">仅红利税</option></select>
               <button class="button subtle" id="exportCsvButton">导出 CSV</button>
             </div>
           </div>
           <div class="table-wrap">
             <table>
-              <thead><tr><th>交易时间</th><th>方向</th><th class="number">数量</th><th class="number">成交价</th><th class="number">成交额</th><th class="number">费用</th><th class="number">交易后持仓</th><th class="number">较初始</th><th class="number">摊薄成本</th><th>备注</th><th>操作</th></tr></thead>
+              <thead><tr><th>记录时间</th><th>类型</th><th class="number">数量</th><th class="number">成交价</th><th class="number">发生金额</th><th class="number">交易费用</th><th class="number">记录后持仓</th><th class="number">较初始</th><th class="number">摊薄成本</th><th>备注</th><th>操作</th></tr></thead>
               <tbody id="transactionsBody"></tbody>
             </table>
           </div>
-          <div class="table-empty" id="transactionsEmpty">还没有交易记录，从上方录入第一笔吧。</div>
+          <div class="table-empty" id="transactionsEmpty">还没有买卖或股息记录，从上方录入第一笔吧。</div>
         </section>
       </div>
     </main>
@@ -170,7 +182,7 @@
           <label><span>股票代码</span><input id="securityCode" inputmode="numeric" maxlength="6" placeholder="例如 600519" required /></label>
           <label><span>股票简称</span><input id="securityName" maxlength="12" placeholder="例如 贵州茅台" required /></label>
           <label><span>初始持仓（股）</span><input type="number" id="initialQuantity" min="0" step="100" placeholder="1000" required /></label>
-          <label><span>初始持仓成本（元/股）</span><input type="number" id="initialCost" min="0" step="0.001" placeholder="10.000" required /></label>
+          <label><span>初始持仓成本（元/股）</span><input type="number" id="initialCost" min="0" step="0.0001" placeholder="10.0000" required /></label>
         </div>
         <p class="dialog-note">初始仓位作为基准，不参与 FIFO 配对；后续可修改并自动重算。</p>
         <p class="form-error" id="securityError" role="alert"></p>

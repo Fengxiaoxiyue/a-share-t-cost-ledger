@@ -8,15 +8,15 @@
     transferRate: 0.00001,
     stampDutyRate: 0.0005,
   };
-  const EMPTY_STATE = { version: 1, selectedSecurityId: null, securities: [], transactions: [], fees: DEFAULT_FEES };
+  const EMPTY_STATE = { version: 1, selectedSecurityId: null, securities: [], transactions: [], fees: DEFAULT_FEES, includeDividendsInCost: false };
   const $ = (selector) => document.querySelector(selector);
   const $$ = (selector) => [...document.querySelectorAll(selector)];
   const el = {
     securitySelect: $("#securitySelect"), marketBadge: $("#marketBadge"), workspace: $("#workspace"), emptyState: $("#emptyState"),
-    dilutedCost: $("#dilutedCost"), costChange: $("#costChange"), currentHolding: $("#currentHolding"), holdingDifference: $("#holdingDifference"),
+    dilutedCost: $("#dilutedCost"), dilutedCostHelp: $("#dilutedCostHelp"), costChange: $("#costChange"), currentHolding: $("#currentHolding"), holdingDifference: $("#holdingDifference"),
     portfolioWeight: $("#portfolioWeight"), portfolioWeightDetail: $("#portfolioWeightDetail"),
-    closedProfit: $("#closedProfit"), loopCount: $("#loopCount"), totalFees: $("#totalFees"), feeHint: $("#feeHint"), queueStatus: $("#queueStatus"),
-    tradeForm: $("#tradeForm"), tradeDatetime: $("#tradeDatetime"), tradeQuantity: $("#tradeQuantity"), tradePrice: $("#tradePrice"), tradeNote: $("#tradeNote"),
+    closedProfit: $("#closedProfit"), loopCount: $("#loopCount"), totalFees: $("#totalFees"), feeHint: $("#feeHint"), netDividend: $("#netDividend"), dividendHint: $("#dividendHint"), queueStatus: $("#queueStatus"),
+    dividendModeButton: $("#dividendModeButton"), tradeForm: $("#tradeForm"), tradeDatetime: $("#tradeDatetime"), tradeQuantity: $("#tradeQuantity"), tradePrice: $("#tradePrice"), cashAmount: $("#cashAmount"), cashAmountLabel: $("#cashAmountLabel"), tradeNote: $("#tradeNote"),
     editingTradeId: $("#editingTradeId"), tradeFormTitle: $("#tradeFormTitle"), cancelEditButton: $("#cancelEditButton"), tradePreview: $("#tradePreview"), tradeError: $("#tradeError"),
     transactionsBody: $("#transactionsBody"), transactionsEmpty: $("#transactionsEmpty"), loopsBody: $("#loopsBody"), loopsEmpty: $("#loopsEmpty"), sideFilter: $("#sideFilter"),
     securityDialog: $("#securityDialog"), securityForm: $("#securityForm"), securityId: $("#securityId"), securityDialogTitle: $("#securityDialogTitle"),
@@ -53,6 +53,18 @@
 
   function currentSecurity() {
     return state.securities.find((item) => item.id === state.selectedSecurityId) || null;
+  }
+
+  function analysisOptions() {
+    return { includeDividendsInCost: Boolean(state.includeDividendsInCost) };
+  }
+
+  function selectedEntryType() {
+    return $("input[name='entryType']:checked")?.value || "buy";
+  }
+
+  function isCashEntry(type = selectedEntryType()) {
+    return type === "dividend" || type === "dividend_tax";
   }
 
   function uid(prefix) {
@@ -117,10 +129,11 @@
     el.emptyState.hidden = Boolean(security);
     el.workspace.hidden = !security;
     $("#editSecurityButton").disabled = !security;
+    el.dividendModeButton.disabled = !security;
     el.marketBadge.textContent = security ? marketName(security.code) : "—";
     if (!security) return;
 
-    const analysis = TradeEngine.analyzeSecurity(security, state.transactions, state.fees);
+    const analysis = TradeEngine.analyzeSecurity(security, state.transactions, state.fees, analysisOptions());
     renderSummary(security, analysis);
     renderLoops(security, analysis);
     renderTransactions(analysis);
@@ -129,14 +142,20 @@
   }
 
   function renderSummary(security, analysis) {
-    el.dilutedCost.textContent = analysis.dilutedCost === null ? "已清仓" : `¥ ${money(analysis.dilutedCost, 3)}`;
+    el.dilutedCost.textContent = analysis.dilutedCost === null ? "已清仓" : `¥ ${money(analysis.dilutedCost, 4)}`;
     const reduction = analysis.costReduction;
-    el.costChange.textContent = reduction === null ? "当前无持仓，暂不计算单位成本" : `${reduction >= 0 ? "较初始降低" : "较初始升高"} ¥ ${money(Math.abs(reduction), 3)} / 股`;
+    el.costChange.textContent = reduction === null ? "当前无持仓，暂不计算单位成本" : `${reduction >= 0 ? "较初始降低" : "较初始升高"} ¥ ${money(Math.abs(reduction), 4)} / 股`;
     setValueClass(el.costChange, reduction, true);
+    el.dividendModeButton.textContent = state.includeDividendsInCost ? "股息模式：计入成本" : "股息模式：不计入成本";
+    el.dividendModeButton.classList.toggle("active", state.includeDividendsInCost);
+    el.dividendModeButton.setAttribute("aria-pressed", String(Boolean(state.includeDividendsInCost)));
+    el.dilutedCostHelp.title = state.includeDividendsInCost
+      ? "初始持仓总成本 + 累计买入支出 − 累计卖出净收入 − 分红入账 + 红利税，再除以当前持仓。"
+      : "初始持仓总成本 + 累计买入支出 − 累计卖出净收入，再除以当前持仓；已记录股息不参与成本。";
     el.currentHolding.textContent = `${number(analysis.currentHolding)} 股`;
     el.holdingDifference.textContent = `初始 ${number(security.initialQuantity)} 股 · 当前偏差 ${signNumber(analysis.holdingDifference, " 股")}`;
     setValueClass(el.holdingDifference, analysis.holdingDifference, false);
-    const allocation = TradeEngine.calculatePortfolioAllocation(state.securities, state.transactions, state.fees, security.id);
+    const allocation = TradeEngine.calculatePortfolioAllocation(state.securities, state.transactions, state.fees, security.id, analysisOptions());
     el.portfolioWeight.textContent = allocation.totalValue > 0 ? `${money(allocation.weight, 2)}%` : "—";
     el.portfolioWeightDetail.textContent = allocation.totalValue > 0
       ? `本股 ¥${money(allocation.securityValue)} / 全部 ¥${money(allocation.totalValue)}`
@@ -146,6 +165,9 @@
     el.loopCount.textContent = `${analysis.loops.length} 个 FIFO 配对 · 未配买 ${number(analysis.unmatched.buy)} / 卖 ${number(analysis.unmatched.sell)} 股`;
     el.totalFees.textContent = `¥ ${money(analysis.cumulativeFees)}`;
     el.feeHint.textContent = `佣金万${state.fees.commissionRate * 10000} · 最低 ¥${money(state.fees.minimumCommission)} · 印花税万${state.fees.stampDutyRate * 10000}`;
+    el.netDividend.textContent = `¥ ${money(analysis.netDividend)}`;
+    setValueClass(el.netDividend, analysis.netDividend, true);
+    el.dividendHint.textContent = `分红 ¥${money(analysis.cumulativeDividend)} · 红利税 ¥${money(analysis.cumulativeDividendTax)} · ${state.includeDividendsInCost ? "已计入成本" : "未计入成本"}`;
   }
 
   function renderLoops(security, analysis) {
@@ -165,26 +187,31 @@
 
   function renderTransactions(analysis) {
     const filter = el.sideFilter.value;
-    const rows = [...analysis.rows].reverse().filter((row) => filter === "all" || row.side === filter);
+    const rows = [...analysis.rows].reverse().filter((row) => filter === "all" || (row.entryType === "trade" ? row.side : row.entryType) === filter);
     el.transactionsEmpty.hidden = rows.length > 0;
-    el.transactionsBody.innerHTML = rows.map((row) => `
+    el.transactionsBody.innerHTML = rows.map((row) => {
+      const type = row.entryType === "trade" ? row.side : row.entryType;
+      const typeLabel = { buy: "买入", sell: "卖出", dividend: "分红入账", dividend_tax: "红利税" }[type];
+      const amountText = row.entryType === "trade" ? money(row.fees.gross) : `${type === "dividend" ? "+" : "−"}${money(row.amount)}`;
+      return `
       <tr>
-        <td>${formatDate(row.datetime)}</td><td><span class="side-tag ${row.side}">${row.side === "buy" ? "买入" : "卖出"}</span></td>
-        <td class="number">${number(row.quantity)}</td><td class="number">¥ ${money(row.price, 3)}</td><td class="number">¥ ${money(row.fees.gross)}</td>
-        <td class="number" title="佣金 ${money(row.fees.commission)}；过户费 ${money(row.fees.transferFee)}；印花税 ${money(row.fees.stampDuty)}">¥ ${money(row.fees.total)}</td>
+        <td>${formatDate(row.datetime)}</td><td><span class="side-tag ${type}">${typeLabel}</span></td>
+        <td class="number">${row.entryType === "trade" ? number(row.quantity) : "—"}</td><td class="number">${row.entryType === "trade" ? `¥ ${money(row.price, 4)}` : "—"}</td><td class="number ${type === "dividend" ? "positive" : type === "dividend_tax" ? "negative" : ""}">¥ ${amountText}</td>
+        <td class="number" ${row.entryType === "trade" ? `title="佣金 ${money(row.fees.commission)}；过户费 ${money(row.fees.transferFee)}；印花税 ${money(row.fees.stampDuty)}"` : ""}>${row.entryType === "trade" ? `¥ ${money(row.fees.total)}` : "—"}</td>
         <td class="number">${number(row.holdingAfter)}</td><td class="number ${row.holdingDifference > 0 ? "negative" : row.holdingDifference < 0 ? "positive" : ""}">${signNumber(row.holdingDifference)}</td>
-        <td class="number">${row.dilutedCostAfter === null ? "—" : `¥ ${money(row.dilutedCostAfter, 3)}`}</td><td>${escapeHtml(row.note || "—")}</td>
+        <td class="number">${row.dilutedCostAfter === null ? "—" : `¥ ${money(row.dilutedCostAfter, 4)}`}</td><td>${escapeHtml(row.note || "—")}</td>
         <td><button class="table-action" data-edit="${row.id}">编辑</button><button class="table-action delete" data-delete="${row.id}">删除</button></td>
-      </tr>`).join("");
+      </tr>`;
+    }).join("");
   }
 
   function renderCharts(security, analysis) {
     const costData = [{ label: "初始", cost: Number(security.initialCost), price: null }].concat(
-      analysis.rows.map((row) => ({ label: formatDate(row.datetime), cost: row.dilutedCostAfter, price: Number(row.price) }))
+      analysis.rows.map((row) => ({ label: formatDate(row.datetime), cost: row.dilutedCostAfter, price: row.entryType === "trade" ? Number(row.price) : null }))
     );
     drawLineChart($("#costChart"), costData, [
-      { key: "cost", label: "摊薄成本", color: "#1671c9", format: (v) => `¥${money(v, 3)}` },
-      { key: "price", label: "成交价", color: "#c67b12", format: (v) => `¥${money(v, 3)}` },
+      { key: "cost", label: "摊薄成本", color: "#1671c9", format: (v) => `¥${money(v, 4)}` },
+      { key: "price", label: "成交价", color: "#c67b12", format: (v) => `¥${money(v, 4)}` },
     ]);
     const positionData = [{ label: "初始", position: 0, profit: 0 }].concat(
       analysis.rows.map((row) => ({ label: formatDate(row.datetime), position: row.holdingDifference, profit: row.cumulativeClosedProfit }))
@@ -198,7 +225,7 @@
     return node;
   }
 
-  function chartFrame(container, values, baselineZero = false) {
+  function chartFrame(container, values, baselineZero = false, digits = 2) {
     container.innerHTML = "";
     if (values.length <= 1) {
       container.innerHTML = '<div class="chart-empty">录入交易后生成趋势图</div>';
@@ -217,7 +244,7 @@
       const cy = y(value);
       svg.appendChild(svgElement("line", { x1: pad.left, y1: cy, x2: width - pad.right, y2: cy, stroke: "#e4ebf1", "stroke-width": 1 }));
       const label = svgElement("text", { x: pad.left - 8, y: cy + 4, "text-anchor": "end", fill: "#7a899a", "font-size": 10 });
-      label.textContent = Math.abs(value) >= 1000 ? `${(value / 1000).toFixed(1)}k` : value.toFixed(2);
+      label.textContent = Math.abs(value) >= 1000 ? `${(value / 1000).toFixed(1)}k` : value.toFixed(digits);
       svg.appendChild(label);
     }
     const baseline = y(0);
@@ -249,7 +276,7 @@
 
   function drawLineChart(container, data, series) {
     const values = data.flatMap((item) => series.map((entry) => item[entry.key])).filter((value) => value !== null && Number.isFinite(Number(value))).map(Number);
-    const frame = chartFrame(container, values);
+    const frame = chartFrame(container, values, false, 4);
     if (!frame) return;
     series.forEach((entry) => {
       let path = "", drawing = false;
@@ -334,11 +361,21 @@
 
   function updateTradePreview() {
     const security = currentSecurity();
+    const entryType = selectedEntryType();
+    if (isCashEntry(entryType)) {
+      const amount = Number(el.cashAmount.value);
+      if (!security || !amount) { el.tradePreview.textContent = "输入金额后显示成本影响"; return; }
+      const effect = entryType === "dividend" ? -amount : amount;
+      const analysis = TradeEngine.analyzeSecurity(security, state.transactions.filter((item) => item.id !== el.editingTradeId.value), state.fees, analysisOptions());
+      const afterCost = analysis.currentHolding > 0 ? (analysis.costBalance + (state.includeDividendsInCost ? effect : 0)) / analysis.currentHolding : null;
+      el.tradePreview.innerHTML = `${entryType === "dividend" ? "分红入账" : "红利税补扣"} <strong>¥${money(amount)}</strong> · ${state.includeDividendsInCost ? `计入后摊薄成本 <strong>${afterCost === null ? "已清仓" : `¥${money(afterCost, 4)}`}</strong>` : "当前模式下仅记录，不改变摊薄成本"}`;
+      return;
+    }
     const quantity = Number(el.tradeQuantity.value), price = Number(el.tradePrice.value);
     if (!security || !quantity || !price) { el.tradePreview.textContent = "输入价格后显示预估费用"; return; }
-    const side = $("input[name='side']:checked").value;
+    const side = entryType;
     const fees = TradeEngine.calculateFees({ quantity, price, side }, state.fees);
-    const analysis = TradeEngine.analyzeSecurity(security, state.transactions.filter((item) => item.id !== el.editingTradeId.value), state.fees);
+    const analysis = TradeEngine.analyzeSecurity(security, state.transactions.filter((item) => item.id !== el.editingTradeId.value), state.fees, analysisOptions());
     const after = analysis.currentHolding + (side === "buy" ? quantity : -quantity);
     el.tradePreview.innerHTML = `成交额 <strong>¥${money(fees.gross)}</strong> · 费用 <strong>¥${money(fees.total)}</strong>（佣金 ${money(fees.commission)} / 过户 ${money(fees.transferFee)} / 印花税 ${money(fees.stampDuty)}） · 预计持仓 <strong>${number(after)} 股</strong>`;
   }
@@ -348,39 +385,63 @@
     const security = currentSecurity(); if (!security) return;
     const editingId = el.editingTradeId.value;
     const existing = state.transactions.find((item) => item.id === editingId);
-    const trade = {
-      id: editingId || uid("tx"), securityId: security.id, datetime: el.tradeDatetime.value,
-      side: $("input[name='side']:checked").value, quantity: Number(el.tradeQuantity.value), price: Number(el.tradePrice.value),
-      note: el.tradeNote.value.trim(), sequence: existing?.sequence || Date.now(),
-    };
-    const error = TradeEngine.validateTrade(security, state.transactions, trade, editingId);
+    const entryType = selectedEntryType();
+    const common = { id: editingId || uid("tx"), securityId: security.id, datetime: el.tradeDatetime.value, note: el.tradeNote.value.trim(), sequence: existing?.sequence || Date.now() };
+    const trade = isCashEntry(entryType)
+      ? { ...common, type: entryType, amount: Number(el.cashAmount.value) }
+      : { ...common, type: "trade", side: entryType, quantity: Number(el.tradeQuantity.value), price: Number(el.tradePrice.value) };
+    const error = isCashEntry(entryType)
+      ? TradeEngine.validateCashEntry(trade)
+      : TradeEngine.validateTrade(security, state.transactions, trade, editingId);
     if (error) { el.tradeError.textContent = error; return; }
     if (editingId) state.transactions = state.transactions.map((item) => item.id === editingId ? trade : item);
     else state.transactions.push(trade);
-    saveState(editingId ? "交易已更新并重新计算" : "交易已保存并自动配对");
+    saveState(editingId ? "记录已更新并重新计算" : isCashEntry(entryType) ? "股息记录已保存" : "交易已保存并自动配对");
     resetTradeForm(); render();
   }
 
   function editTrade(id) {
     const trade = state.transactions.find((item) => item.id === id); if (!trade) return;
-    el.editingTradeId.value = trade.id; el.tradeDatetime.value = trade.datetime; el.tradeQuantity.value = trade.quantity;
-    el.tradePrice.value = trade.price; el.tradeNote.value = trade.note || "";
-    $(`input[name="side"][value="${trade.side}"]`).checked = true;
-    el.tradeFormTitle.textContent = "编辑交易"; el.cancelEditButton.hidden = false; el.tradeError.textContent = "";
+    const entryType = TradeEngine.transactionType(trade) === "trade" ? trade.side : trade.type;
+    el.editingTradeId.value = trade.id; el.tradeDatetime.value = trade.datetime; el.tradeQuantity.value = trade.quantity ?? 100;
+    el.tradePrice.value = trade.price ?? ""; el.cashAmount.value = trade.amount ?? ""; el.tradeNote.value = trade.note || "";
+    $(`input[name="entryType"][value="${entryType}"]`).checked = true;
+    updateEntryFormMode();
+    el.tradeFormTitle.textContent = "编辑记录"; el.cancelEditButton.hidden = false; el.tradeError.textContent = "";
     updateTradePreview(); el.tradeForm.scrollIntoView({ behavior: "smooth", block: "center" });
   }
 
   function deleteTrade(id) {
     const trade = state.transactions.find((item) => item.id === id); if (!trade) return;
-    if (!confirm(`确定删除 ${formatDate(trade.datetime)} 的这笔${trade.side === "buy" ? "买入" : "卖出"}记录吗？`)) return;
+    const entryType = TradeEngine.transactionType(trade) === "trade" ? trade.side : trade.type;
+    const label = { buy: "买入", sell: "卖出", dividend: "分红入账", dividend_tax: "红利税" }[entryType];
+    if (!confirm(`确定删除 ${formatDate(trade.datetime)} 的这笔${label}记录吗？`)) return;
     state.transactions = state.transactions.filter((item) => item.id !== id);
     if (el.editingTradeId.value === id) resetTradeForm();
-    saveState("交易已删除，相关闭环已重新计算"); render();
+    saveState("记录已删除，相关数据已重新计算"); render();
+  }
+
+  function updateEntryFormMode() {
+    const entryType = selectedEntryType();
+    const cash = isCashEntry(entryType);
+    $$(".trade-only").forEach((item) => { item.hidden = cash; });
+    $$(".cash-only").forEach((item) => { item.hidden = !cash; });
+    el.tradeQuantity.required = !cash;
+    el.tradePrice.required = !cash;
+    el.cashAmount.required = cash;
+    el.cashAmountLabel.textContent = entryType === "dividend_tax" ? "补扣税额（元）" : "入账金额（元）";
+    updateTradePreview();
   }
 
   function resetTradeForm() {
     el.tradeForm.reset(); el.editingTradeId.value = ""; el.tradeDatetime.value = nowForInput(); el.tradeQuantity.value = 100;
-    el.tradeFormTitle.textContent = "录入一笔交易"; el.cancelEditButton.hidden = true; el.tradeError.textContent = ""; updateTradePreview();
+    el.tradeFormTitle.textContent = "录入一笔记录"; el.cancelEditButton.hidden = true; el.tradeError.textContent = ""; updateEntryFormMode();
+  }
+
+  function toggleDividendMode() {
+    state.includeDividendsInCost = !state.includeDividendsInCost;
+    saveState(state.includeDividendsInCost ? "已开启：净股息计入摊薄成本" : "已关闭：股息仅记录、不计入成本");
+    render();
   }
 
   function openFeeDialog() {
@@ -432,9 +493,14 @@
   function csvCell(value) { return `"${String(value ?? "").replaceAll('"', '""')}"`; }
   function exportCsv() {
     const security = currentSecurity(); if (!security) return;
-    const analysis = TradeEngine.analyzeSecurity(security, state.transactions, state.fees);
-    const header = ["交易时间","方向","数量(股)","成交价格","成交额","佣金","过户费","印花税","总费用","交易后持仓","较初始仓位","摊薄成本","备注"];
-    const lines = [header, ...analysis.rows.map((row) => [row.datetime,row.side === "buy" ? "买入" : "卖出",row.quantity,row.price,row.fees.gross,row.fees.commission,row.fees.transferFee,row.fees.stampDuty,row.fees.total,row.holdingAfter,row.holdingDifference,row.dilutedCostAfter ?? "",row.note || ""])];
+    const analysis = TradeEngine.analyzeSecurity(security, state.transactions, state.fees, analysisOptions());
+    const header = ["记录时间","类型","数量(股)","成交价格","发生金额","佣金","过户费","印花税","总费用","记录后持仓","较初始仓位","摊薄成本","备注"];
+    const lines = [header, ...analysis.rows.map((row) => {
+      const type = row.entryType === "trade" ? row.side : row.entryType;
+      const label = { buy: "买入", sell: "卖出", dividend: "分红入账", dividend_tax: "股息红利税" }[type];
+      const amount = row.entryType === "trade" ? row.fees.gross : (type === "dividend" ? row.amount : -row.amount);
+      return [row.datetime,label,row.entryType === "trade" ? row.quantity : "",row.entryType === "trade" ? Number(row.price).toFixed(4) : "",amount,row.fees.commission,row.fees.transferFee,row.fees.stampDuty,row.fees.total,row.holdingAfter,row.holdingDifference,row.dilutedCostAfter === null ? "" : Number(row.dilutedCostAfter).toFixed(4),row.note || ""];
+    })];
     download(`${security.code}_${security.name}_交易流水.csv`, "\ufeff" + lines.map((line) => line.map(csvCell).join(",")).join("\r\n"), "text/csv;charset=utf-8");
     showToast("当前股票流水已导出");
   }
@@ -445,16 +511,19 @@
   el.securityForm.addEventListener("submit", saveSecurity); el.deleteSecurityButton.addEventListener("click", deleteSecurity);
   el.securitySelect.addEventListener("change", () => { state.selectedSecurityId = el.securitySelect.value; saveState(); resetTradeForm(); render(); });
   el.tradeForm.addEventListener("submit", saveTrade); el.cancelEditButton.addEventListener("click", resetTradeForm);
-  [el.tradeQuantity, el.tradePrice, ...$$("input[name='side']")].forEach((input) => input.addEventListener("input", updateTradePreview));
+  [el.tradeQuantity, el.tradePrice, el.cashAmount].forEach((input) => input.addEventListener("input", updateTradePreview));
+  $$("input[name='entryType']").forEach((input) => input.addEventListener("input", updateEntryFormMode));
   el.transactionsBody.addEventListener("click", (event) => { const editId = event.target.dataset.edit, deleteId = event.target.dataset.delete; if (editId) editTrade(editId); if (deleteId) deleteTrade(deleteId); });
   el.sideFilter.addEventListener("change", render);
+  el.dividendModeButton.addEventListener("click", toggleDividendMode);
   $("#feeButton").addEventListener("click", openFeeDialog); el.feeForm.addEventListener("submit", saveFees);
   $("#backupButton").addEventListener("click", () => el.backupDialog.showModal()); $("#closeBackupButton").addEventListener("click", () => el.backupDialog.close());
   $("#exportJsonButton").addEventListener("click", exportBackup); $("#importJsonButton").addEventListener("click", () => el.importFile.click());
   el.importFile.addEventListener("change", () => importBackup(el.importFile.files[0])); $("#exportCsvButton").addEventListener("click", exportCsv);
   $$('[data-close]').forEach((button) => button.addEventListener("click", () => document.getElementById(button.dataset.close).close()));
-  window.addEventListener("resize", () => { if (currentSecurity()) renderCharts(currentSecurity(), TradeEngine.analyzeSecurity(currentSecurity(), state.transactions, state.fees)); });
+  window.addEventListener("resize", () => { if (currentSecurity()) renderCharts(currentSecurity(), TradeEngine.analyzeSecurity(currentSecurity(), state.transactions, state.fees, analysisOptions())); });
 
   el.tradeDatetime.value = nowForInput();
+  updateEntryFormMode();
   render();
 })();
