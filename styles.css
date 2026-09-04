@@ -65,6 +65,15 @@ button { cursor: pointer; }
   font-size: 11px; font-weight: 700;
 }
 
+.baseline-bar {
+  display: flex; align-items: center; justify-content: space-between; gap: 18px;
+  margin-bottom: 12px; padding: 12px 16px; border: 1px solid #cbdcea; border-left: 4px solid var(--blue-600);
+  border-radius: 10px; background: #f7fbff; box-shadow: 0 2px 10px rgba(25,52,79,.035);
+}
+.baseline-bar > div { display: flex; align-items: baseline; flex-wrap: wrap; gap: 8px; }
+.baseline-label { color: var(--blue-600); font-size: 10px; font-weight: 800; letter-spacing: .1em; }
+.baseline-bar strong { color: var(--navy-900); font-size: 13px; }
+.baseline-bar small { color: var(--muted); font-size: 11px; }
 .button {
   border: 0; border-radius: 8px; min-height: 38px; padding: 0 15px;
   font-weight: 650; transition: transform .15s, background .15s, border-color .15s;
@@ -163,6 +172,13 @@ tbody tr:hover { background: #f8fbfd; }
 .side-tag.dividend_tax { color: #8e4a17; background: #fff1e8; }
 .table-action { border: 0; background: transparent; color: var(--blue-600); padding: 3px 5px; font-size: 11px; }
 .table-action.delete { color: #b34545; }
+.segment-tag { display: inline-block; padding: 3px 7px; border-radius: 99px; color: #657489; background: #edf2f6; font-size: 10px; font-weight: 700; }
+.segment-tag.baseline { color: #0e65ad; background: var(--blue-100); }
+.segment-tag.after { color: #256c62; background: var(--sell-soft); }
+tr.baseline-history { opacity: .64; }
+tr.current-baseline { background: #f4f9ff; }
+.table-action[disabled] { color: #96a3b0; cursor: not-allowed; }
+.table-action[disabled]:hover { text-decoration: none; }
 .table-empty { padding: 28px 20px; color: #8795a5; text-align: center; font-size: 12px; }
 
 .empty-state { padding: 90px 20px; border: 1px dashed #b9c8d7; border-radius: 14px; background: rgba(255,255,255,.62); text-align: center; }
@@ -219,6 +235,8 @@ dialog::backdrop { background: rgba(5,18,32,.55); backdrop-filter: blur(2px); }
   .security-actions { flex-wrap: wrap; }
   .security-actions .button { flex: 1; }
   .security-actions .dividend-mode { flex-basis: 100%; }
+  .baseline-bar { align-items: stretch; flex-direction: column; }
+  .baseline-bar .button { width: 100%; }
   .summary-grid { grid-template-columns: 1fr 1fr; gap: 8px; }
   .metric-card { padding: 14px; }
   .metric-card.featured { padding-left: 11px; }

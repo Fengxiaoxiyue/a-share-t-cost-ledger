@@ -41,3 +41,15 @@ test("Windows 启动入口以独立应用窗口打开本地工具", () => {
   assert.match(launcher, /--app=\$toolUri/);
   assert.match(launcher, /Start-Process -FilePath \$browserPath/);
 });
+
+test("移动基准界面包含状态栏、恢复入口、流水操作和 CSV 区段", () => {
+  assert.match(html, /v1\.3\.0-beta\.1 测试版/);
+  assert.match(html, /id="baselineStatus"/);
+  assert.match(html, /id="restoreBaselineButton"/);
+  assert.match(html, /较基准/);
+  assert.match(app, /createBaselineSnapshot/);
+  assert.match(app, /data-baseline/);
+  assert.match(app, /analysis\.historyRows/);
+  assert.match(app, /基准区段/);
+  assert.match(app, /请先移动基准或恢复原始基准/);
+});

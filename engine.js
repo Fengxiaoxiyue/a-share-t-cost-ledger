@@ -50,14 +50,9 @@
     return { gross: 0, commission: 0, transferFee: 0, stampDuty: 0, total: 0, cashFlow: 0 };
   }
 
-  function analyzeSecurity(security, transactions, feeSettings, options = {}) {
-    const relevant = sortTransactions(
-      transactions.filter((item) => item.securityId === security.id)
-    );
-    const initialQuantity = Number(security.initialQuantity) || 0;
-    const initialCost = Number(security.initialCost) || 0;
-    let holding = initialQuantity;
-    let costBalance = initialQuantity * initialCost;
+  function analyzePeriod(baseQuantity, baseCost, relevant, feeSettings, options = {}) {
+    let holding = Number(baseQuantity) || 0;
+    let costBalance = holding * (Number(baseCost) || 0);
     let cumulativeClosedProfit = 0;
     let cumulativeFees = 0;
     let cumulativeDividend = 0;
@@ -84,7 +79,7 @@
           amount,
           fees: emptyFees(),
           holdingAfter: holding,
-          holdingDifference: holding - initialQuantity,
+          holdingDifference: holding - baseQuantity,
           costBalanceAfter: roundNumber(costBalance),
           dilutedCostAfter: holding > 0 ? roundNumber(costBalance / holding) : null,
           cumulativeClosedProfit: roundNumber(cumulativeClosedProfit),
@@ -132,7 +127,8 @@
           sellUnitProceeds,
           profit: roundNumber(profit),
           cumulativeProfit: roundNumber(cumulativeClosedProfit),
-          costReductionPerInitialShare: initialQuantity > 0 ? roundNumber(profit / initialQuantity) : 0,
+          costReductionPerBaselineShare: baseQuantity > 0 ? roundNumber(profit / baseQuantity) : 0,
+          costReductionPerInitialShare: baseQuantity > 0 ? roundNumber(profit / baseQuantity) : 0,
         });
 
         remaining -= matchedQuantity;
@@ -153,7 +149,7 @@
         entryType,
         fees,
         holdingAfter: holding,
-        holdingDifference: holding - initialQuantity,
+        holdingDifference: holding - baseQuantity,
         costBalanceAfter: roundNumber(costBalance),
         dilutedCostAfter: holding > 0 ? roundNumber(costBalance / holding) : null,
         cumulativeClosedProfit: roundNumber(cumulativeClosedProfit),
@@ -172,10 +168,10 @@
       rows,
       loops,
       currentHolding: holding,
-      holdingDifference: holding - initialQuantity,
+      holdingDifference: holding - baseQuantity,
       costBalance: roundNumber(costBalance),
       dilutedCost: holding > 0 ? roundNumber(costBalance / holding) : null,
-      costReduction: holding > 0 ? roundNumber(initialCost - costBalance / holding) : null,
+      costReduction: holding > 0 ? roundNumber(baseCost - costBalance / holding) : null,
       cumulativeClosedProfit: roundNumber(cumulativeClosedProfit),
       cumulativeFees,
       cumulativeDividend,
@@ -186,10 +182,117 @@
     };
   }
 
+  function originalSecurity(security) {
+    return { ...security, baseline: null };
+  }
+
+  function validBaseline(security, relevant) {
+    const baseline = security.baseline;
+    if (!baseline || !baseline.transactionId) return null;
+    const anchorIndex = relevant.findIndex((item) => item.id === baseline.transactionId);
+    const quantity = Number(baseline.quantity);
+    const cost = Number(baseline.cost);
+    if (anchorIndex < 0 || baseline.quantity === null || baseline.quantity === "" || !Number.isFinite(quantity) || quantity < 0 || quantity % 100 !== 0 || baseline.cost === null || baseline.cost === "" || !Number.isFinite(cost)) return null;
+    return { ...baseline, quantity, cost, anchorIndex };
+  }
+
+  function analyzeSecurity(security, transactions, feeSettings, options = {}) {
+    const relevant = sortTransactions(
+      transactions.filter((item) => item.securityId === security.id)
+    );
+    const initialQuantity = Number(security.initialQuantity) || 0;
+    const initialCost = Number(security.initialCost) || 0;
+    const baseline = validBaseline(security, relevant);
+
+    if (!baseline) {
+      const result = analyzePeriod(initialQuantity, initialCost, relevant, feeSettings, options);
+      const historyRows = result.rows.map((row) => ({ ...row, baselineSegment: "after" }));
+      return {
+        ...result,
+        rows: historyRows,
+        historyRows,
+        baseline: {
+          isCustom: false,
+          invalid: Boolean(security.baseline),
+          quantity: initialQuantity,
+          cost: initialCost,
+          transactionId: null,
+          datetime: null,
+        },
+      };
+    }
+
+    const original = analyzePeriod(initialQuantity, initialCost, relevant, feeSettings, options);
+    const activeTransactions = relevant.slice(baseline.anchorIndex + 1);
+    const active = analyzePeriod(baseline.quantity, baseline.cost, activeTransactions, feeSettings, options);
+    const beforeRows = original.rows.slice(0, baseline.anchorIndex).map((row) => ({ ...row, baselineSegment: "before" }));
+    const sourceAnchor = original.rows[baseline.anchorIndex];
+    const anchorRow = {
+      ...sourceAnchor,
+      holdingAfter: baseline.quantity,
+      holdingDifference: 0,
+      costBalanceAfter: roundNumber(baseline.quantity * baseline.cost),
+      dilutedCostAfter: baseline.quantity > 0 ? roundNumber(baseline.cost) : null,
+      cumulativeClosedProfit: 0,
+      cumulativeDividend: 0,
+      cumulativeDividendTax: 0,
+      netDividend: 0,
+      baselineSegment: "baseline",
+    };
+    const activeRows = active.rows.map((row) => ({ ...row, baselineSegment: "after" }));
+
+    return {
+      ...active,
+      rows: activeRows,
+      historyRows: [...beforeRows, anchorRow, ...activeRows],
+      baseline: {
+        isCustom: true,
+        invalid: false,
+        quantity: baseline.quantity,
+        cost: baseline.cost,
+        transactionId: baseline.transactionId,
+        datetime: baseline.datetime || sourceAnchor.datetime,
+        setAt: baseline.setAt || null,
+      },
+    };
+  }
+
+  function createBaselineSnapshot(security, transactions, feeSettings, transactionId, options = {}) {
+    const analysis = analyzeSecurity(originalSecurity(security), transactions, feeSettings, options);
+    const row = analysis.historyRows.find((item) => item.id === transactionId);
+    if (!row) return null;
+    return {
+      transactionId: row.id,
+      datetime: row.datetime,
+      quantity: Number(row.holdingAfter) || 0,
+      cost: row.holdingAfter > 0 && Number.isFinite(Number(row.dilutedCostAfter)) ? roundNumber(row.dilutedCostAfter) : 0,
+      setAt: new Date().toISOString(),
+    };
+  }
   function validateCashEntry(candidate) {
     if (!candidate.datetime) return "请选择记录时间";
     const amount = Number(candidate.amount);
     if (!Number.isFinite(amount) || amount <= 0) return "金额必须大于 0";
+    return "";
+  }
+
+  function validateTransactionHistory(security, transactions) {
+    const sorted = sortTransactions(transactions.filter((item) => item.securityId === security.id));
+    let holding = Number(security.initialQuantity) || 0;
+    for (const item of sorted) {
+      if (transactionType(item) !== "trade") continue;
+      holding += item.side === "buy" ? Number(item.quantity) : -Number(item.quantity);
+      if (holding < 0) return "历史持仓会变为负数，请先调整交易流水";
+    }
+    const baseline = validBaseline(security, sorted);
+    if (baseline) {
+      holding = baseline.quantity;
+      for (const item of sorted.slice(baseline.anchorIndex + 1)) {
+        if (transactionType(item) !== "trade") continue;
+        holding += item.side === "buy" ? Number(item.quantity) : -Number(item.quantity);
+        if (holding < 0) return "基准后的持仓会变为负数，请先调整交易流水";
+      }
+    }
     return "";
   }
 
@@ -205,20 +308,14 @@
     const next = transactions
       .filter((item) => item.securityId === security.id && item.id !== editingId)
       .concat(candidate);
-    let holding = Number(security.initialQuantity) || 0;
-    for (const item of sortTransactions(next)) {
-      if (transactionType(item) !== "trade") continue;
-      holding += item.side === "buy" ? Number(item.quantity) : -Number(item.quantity);
-      if (holding < 0) return "该交易会使历史持仓变为负数，请检查时间或数量";
-    }
-    return "";
+    return validateTransactionHistory(security, next).replace("会变为", "变为");
   }
 
   function calculatePortfolioAllocation(securities, transactions, feeSettings, selectedSecurityId, options = {}) {
     const positions = securities.map((security) => {
       const analysis = analyzeSecurity(security, transactions, feeSettings, options);
       const latestRow = [...analysis.rows].reverse().find((row) => row.entryType === "trade");
-      const valuationPrice = latestRow ? Number(latestRow.price) : Number(security.initialCost);
+      const valuationPrice = latestRow ? Number(latestRow.price) : Number(analysis.baseline.cost);
       const marketValue = Math.max(0, analysis.currentHolding) * Math.max(0, valuationPrice || 0);
       return { securityId: security.id, marketValue };
     });
@@ -234,11 +331,13 @@
   return {
     analyzeSecurity,
     calculatePortfolioAllocation,
+    createBaselineSnapshot,
     calculateFees,
     roundMoney,
     sortTransactions,
     transactionType,
     validateCashEntry,
+    validateTransactionHistory,
     validateTrade,
   };
 });

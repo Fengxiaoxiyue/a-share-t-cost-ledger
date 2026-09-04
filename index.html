@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="description" content="A 股小额做 T 交易、FIFO 闭环收益与摊薄持仓成本跟踪工具" />
-    <title>A 股做 T 成本簿</title>
+    <title>A 股做 T 成本簿 · v1.3.0-beta.1 测试版</title>
     <link rel="stylesheet" href="styles.css" />
     <link rel="stylesheet" href="ocr-styles.css" />
   </head>
@@ -14,7 +14,7 @@
         <div class="brand-mark" aria-hidden="true">T</div>
         <div>
           <h1>A 股做 T 成本簿</h1>
-          <p>FIFO 闭环 · 摊薄持仓成本 · 本地保存</p>
+          <p>FIFO 闭环 · 摊薄持仓成本 · 本地保存 · v1.3.0-beta.1 测试版</p>
         </div>
       </div>
       <div class="top-actions">
@@ -46,9 +46,17 @@
       </section>
 
       <div id="workspace" hidden>
+        <section class="baseline-bar" id="baselineStatus" aria-label="当前基准状态">
+          <div>
+            <span class="baseline-label">当前基准</span>
+            <strong id="baselineSummary">原始初始状态</strong>
+            <small id="baselineDetail">—</small>
+          </div>
+          <button class="button ghost" id="restoreBaselineButton" type="button" hidden>恢复原始基准</button>
+        </section>
         <section class="summary-grid" aria-label="账户摘要">
           <article class="metric-card featured">
-            <div class="metric-label">当前摊薄成本 <span class="info" id="dilutedCostHelp" title="初始持仓总成本 + 累计买入支出 − 累计卖出净收入，再除以当前持仓。">?</span></div>
+            <div class="metric-label">当前摊薄成本 <span class="info" id="dilutedCostHelp" title="基准持仓总成本 + 基准后买入支出 − 基准后卖出净收入，再除以当前持仓。">?</span></div>
             <div class="metric-value" id="dilutedCost">—</div>
             <div class="metric-foot" id="costChange">—</div>
           </article>
@@ -58,7 +66,7 @@
             <div class="metric-foot" id="holdingDifference">—</div>
           </article>
           <article class="metric-card">
-            <div class="metric-label">组合仓位占比 <span class="info" title="当前股票估算市值 ÷ 已添加全部股票的估算持仓总市值。估值采用各股票最新成交价，无交易时采用初始成本价。">?</span></div>
+            <div class="metric-label">组合仓位占比 <span class="info" title="当前股票估算市值 ÷ 已添加全部股票的估算持仓总市值。估值采用基准后的最新成交价，无交易时采用基准成本价。">?</span></div>
             <div class="metric-value" id="portfolioWeight">—</div>
             <div class="metric-foot" id="portfolioWeightDetail">—</div>
           </article>
@@ -167,7 +175,7 @@
           </div>
           <div class="table-wrap">
             <table>
-              <thead><tr><th>记录时间</th><th>类型</th><th class="number">数量</th><th class="number">成交价</th><th class="number">发生金额</th><th class="number">交易费用</th><th class="number">记录后持仓</th><th class="number">较初始</th><th class="number">摊薄成本</th><th>备注</th><th>操作</th></tr></thead>
+              <thead><tr><th>记录时间</th><th>区段</th><th>类型</th><th class="number">数量</th><th class="number">成交价</th><th class="number">发生金额</th><th class="number">交易费用</th><th class="number">记录后持仓</th><th class="number">较基准</th><th class="number">摊薄成本</th><th>备注</th><th>操作</th></tr></thead>
               <tbody id="transactionsBody"></tbody>
             </table>
           </div>
@@ -183,10 +191,10 @@
         <div class="form-grid">
           <label><span>股票代码</span><input id="securityCode" inputmode="numeric" maxlength="6" placeholder="例如 600519" required /></label>
           <label><span>股票简称</span><input id="securityName" maxlength="12" placeholder="例如 贵州茅台" required /></label>
-          <label><span>初始持仓（股）</span><input type="number" id="initialQuantity" min="0" step="100" placeholder="1000" required /></label>
-          <label><span>初始持仓成本（元/股）</span><input type="number" id="initialCost" min="0" step="0.0001" placeholder="10.0000" required /></label>
+          <label><span>原始初始持仓（股）</span><input type="number" id="initialQuantity" min="0" step="100" placeholder="1000" required /></label>
+          <label><span>原始初始成本（元/股）</span><input type="number" id="initialCost" min="0" step="0.0001" placeholder="10.0000" required /></label>
         </div>
-        <p class="dialog-note">初始仓位作为基准，不参与 FIFO 配对；后续可修改并自动重算。</p>
+        <p class="dialog-note">原始初始状态会永久保留。可在流水中把任意记录完成后的状态设为当前基准，并随时恢复到这里。</p>
         <p class="form-error" id="securityError" role="alert"></p>
         <div class="dialog-actions"><button type="button" class="button danger" id="deleteSecurityButton" hidden>删除股票</button><span class="spacer"></span><button type="button" data-close="securityDialog" class="button ghost">取消</button><button type="submit" class="button primary">保存</button></div>
       </form>

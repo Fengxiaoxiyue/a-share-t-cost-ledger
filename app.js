@@ -16,6 +16,7 @@
     dilutedCost: $("#dilutedCost"), dilutedCostHelp: $("#dilutedCostHelp"), costChange: $("#costChange"), currentHolding: $("#currentHolding"), holdingDifference: $("#holdingDifference"),
     portfolioWeight: $("#portfolioWeight"), portfolioWeightDetail: $("#portfolioWeightDetail"),
     closedProfit: $("#closedProfit"), loopCount: $("#loopCount"), totalFees: $("#totalFees"), feeHint: $("#feeHint"), netDividend: $("#netDividend"), dividendHint: $("#dividendHint"), queueStatus: $("#queueStatus"),
+    baselineStatus: $("#baselineStatus"), baselineSummary: $("#baselineSummary"), baselineDetail: $("#baselineDetail"), restoreBaselineButton: $("#restoreBaselineButton"),
     dividendModeButton: $("#dividendModeButton"), tradeForm: $("#tradeForm"), tradeDatetime: $("#tradeDatetime"), tradeQuantity: $("#tradeQuantity"), tradePrice: $("#tradePrice"), cashAmount: $("#cashAmount"), cashAmountLabel: $("#cashAmountLabel"), tradeNote: $("#tradeNote"),
     editingTradeId: $("#editingTradeId"), tradeFormTitle: $("#tradeFormTitle"), cancelEditButton: $("#cancelEditButton"), tradePreview: $("#tradePreview"), tradeError: $("#tradeError"),
     transactionsBody: $("#transactionsBody"), transactionsEmpty: $("#transactionsEmpty"), loopsBody: $("#loopsBody"), loopsEmpty: $("#loopsEmpty"), sideFilter: $("#sideFilter"),
@@ -28,6 +29,7 @@
     ocrClearButton: $("#ocrClearButton"), ocrConfirmButton: $("#ocrConfirmButton"), ocrConfirmHint: $("#ocrConfirmHint"), ocrError: $("#ocrError"),
   };
   let state = loadState();
+  const repairedOnLoad = repairInvalidBaselines(state);
   let toastTimer;
   let ocrRows = [];
   let ocrConnected = false;
@@ -43,6 +45,19 @@
     } catch (_) {
       return structuredClone(EMPTY_STATE);
     }
+  }
+
+  function repairInvalidBaselines(targetState) {
+    let repaired = 0;
+    targetState.securities = targetState.securities.map((security) => {
+      if (!security.baseline) return security;
+      const exists = targetState.transactions.some((item) => item.securityId === security.id && item.id === security.baseline.transactionId);
+      const validNumbers = security.baseline.quantity !== null && security.baseline.quantity !== "" && Number.isFinite(Number(security.baseline.quantity)) && Number(security.baseline.quantity) >= 0 && Number(security.baseline.quantity) % 100 === 0 && security.baseline.cost !== null && security.baseline.cost !== "" && Number.isFinite(Number(security.baseline.cost));
+      if (exists && validNumbers) return security;
+      repaired += 1;
+      return { ...security, baseline: null };
+    });
+    return repaired;
   }
 
   function saveState(message) {
@@ -143,6 +158,7 @@
     if (!security) return;
 
     const analysis = TradeEngine.analyzeSecurity(security, state.transactions, state.fees, analysisOptions());
+    renderBaseline(analysis);
     renderSummary(security, analysis);
     renderLoops(security, analysis);
     renderTransactions(analysis);
@@ -150,19 +166,31 @@
     updateTradePreview();
   }
 
+  function renderBaseline(analysis) {
+    const baseline = analysis.baseline;
+    el.restoreBaselineButton.hidden = !baseline.isCustom;
+    if (baseline.isCustom) {
+      el.baselineSummary.textContent = `${formatDate(baseline.datetime)} 后的状态`;
+      el.baselineDetail.textContent = `${number(baseline.quantity)} 股 · 成本 ${baseline.quantity > 0 ? `¥${money(baseline.cost, 4)} / 股` : "已清仓，成本归零"}`;
+    } else {
+      el.baselineSummary.textContent = "原始初始状态";
+      el.baselineDetail.textContent = `${number(baseline.quantity)} 股 · 成本 ¥${money(baseline.cost, 4)} / 股`;
+    }
+  }
+
   function renderSummary(security, analysis) {
     el.dilutedCost.textContent = analysis.dilutedCost === null ? "已清仓" : `¥ ${money(analysis.dilutedCost, 4)}`;
     const reduction = analysis.costReduction;
-    el.costChange.textContent = reduction === null ? "当前无持仓，暂不计算单位成本" : `${reduction >= 0 ? "较初始降低" : "较初始升高"} ¥ ${money(Math.abs(reduction), 4)} / 股`;
+    el.costChange.textContent = reduction === null ? "当前无持仓，暂不计算单位成本" : `${reduction >= 0 ? "较基准降低" : "较基准升高"} ¥ ${money(Math.abs(reduction), 4)} / 股`;
     setValueClass(el.costChange, reduction, true);
     el.dividendModeButton.textContent = state.includeDividendsInCost ? "股息模式：计入成本" : "股息模式：不计入成本";
     el.dividendModeButton.classList.toggle("active", state.includeDividendsInCost);
     el.dividendModeButton.setAttribute("aria-pressed", String(Boolean(state.includeDividendsInCost)));
     el.dilutedCostHelp.title = state.includeDividendsInCost
-      ? "初始持仓总成本 + 累计买入支出 − 累计卖出净收入 − 分红入账 + 红利税，再除以当前持仓。"
-      : "初始持仓总成本 + 累计买入支出 − 累计卖出净收入，再除以当前持仓；已记录股息不参与成本。";
+      ? "基准持仓总成本 + 基准后买入支出 − 基准后卖出净收入 − 基准后分红 + 基准后红利税，再除以当前持仓。"
+      : "基准持仓总成本 + 基准后买入支出 − 基准后卖出净收入，再除以当前持仓；股息不参与成本。";
     el.currentHolding.textContent = `${number(analysis.currentHolding)} 股`;
-    el.holdingDifference.textContent = `初始 ${number(security.initialQuantity)} 股 · 当前偏差 ${signNumber(analysis.holdingDifference, " 股")}`;
+    el.holdingDifference.textContent = `基准 ${number(analysis.baseline.quantity)} 股 · 当前偏差 ${signNumber(analysis.holdingDifference, " 股")}`;
     setValueClass(el.holdingDifference, analysis.holdingDifference, false);
     const allocation = TradeEngine.calculatePortfolioAllocation(state.securities, state.transactions, state.fees, security.id, analysisOptions());
     el.portfolioWeight.textContent = allocation.totalValue > 0 ? `${money(allocation.weight, 2)}%` : "—";
@@ -190,32 +218,35 @@
         <td><span class="side-tag ${loop.direction === "buy-sell" ? "buy" : "sell"}">${loop.direction === "buy-sell" ? "先买后卖" : "先卖后买"}</span></td>
         <td class="number">${number(loop.quantity)}</td><td class="number">¥ ${money(loop.buyUnitCost, 4)}</td><td class="number">¥ ${money(loop.sellUnitProceeds, 4)}</td>
         <td class="number ${loop.profit >= 0 ? "positive" : "negative"}">${loop.profit >= 0 ? "+" : "−"}¥ ${money(Math.abs(loop.profit))}</td>
-        <td class="number ${loop.costReductionPerInitialShare >= 0 ? "positive" : "negative"}">${loop.costReductionPerInitialShare >= 0 ? "−" : "+"}¥ ${money(Math.abs(loop.costReductionPerInitialShare), 4)}/股</td>
+        <td class="number ${loop.costReductionPerBaselineShare >= 0 ? "positive" : "negative"}">${loop.costReductionPerBaselineShare >= 0 ? "−" : "+"}¥ ${money(Math.abs(loop.costReductionPerBaselineShare), 4)}/股</td>
       </tr>`).join("");
   }
 
   function renderTransactions(analysis) {
     const filter = el.sideFilter.value;
-    const rows = [...analysis.rows].reverse().filter((row) => filter === "all" || (row.entryType === "trade" ? row.side : row.entryType) === filter);
+    const rows = [...analysis.historyRows].reverse().filter((row) => filter === "all" || (row.entryType === "trade" ? row.side : row.entryType) === filter);
     el.transactionsEmpty.hidden = rows.length > 0;
     el.transactionsBody.innerHTML = rows.map((row) => {
       const type = row.entryType === "trade" ? row.side : row.entryType;
       const typeLabel = { buy: "买入", sell: "卖出", dividend: "分红入账", dividend_tax: "红利税" }[type];
+      const segmentLabel = { before: "基准前", baseline: "当前基准", after: "基准后" }[row.baselineSegment];
       const amountText = row.entryType === "trade" ? money(row.fees.gross) : `${type === "dividend" ? "+" : "−"}${money(row.amount)}`;
+      const isAnchor = row.baselineSegment === "baseline";
+      const differenceText = row.baselineSegment === "before" ? "—" : signNumber(row.holdingDifference);
       return `
-      <tr>
-        <td>${formatDate(row.datetime)}</td><td><span class="side-tag ${type}">${typeLabel}</span></td>
+      <tr class="${row.baselineSegment === "before" ? "baseline-history" : isAnchor ? "current-baseline" : ""}">
+        <td>${formatDate(row.datetime)}</td><td><span class="segment-tag ${row.baselineSegment}">${segmentLabel}</span></td><td><span class="side-tag ${type}">${typeLabel}</span></td>
         <td class="number">${row.entryType === "trade" ? number(row.quantity) : "—"}</td><td class="number">${row.entryType === "trade" ? `¥ ${money(row.price, 4)}` : "—"}</td><td class="number ${type === "dividend" ? "positive" : type === "dividend_tax" ? "negative" : ""}">¥ ${amountText}</td>
         <td class="number" ${row.entryType === "trade" ? `title="佣金 ${money(row.fees.commission)}；过户费 ${money(row.fees.transferFee)}；印花税 ${money(row.fees.stampDuty)}"` : ""}>${row.entryType === "trade" ? `¥ ${money(row.fees.total)}` : "—"}</td>
-        <td class="number">${number(row.holdingAfter)}</td><td class="number ${row.holdingDifference > 0 ? "negative" : row.holdingDifference < 0 ? "positive" : ""}">${signNumber(row.holdingDifference)}</td>
+        <td class="number">${number(row.holdingAfter)}</td><td class="number ${row.baselineSegment !== "before" && row.holdingDifference > 0 ? "negative" : row.baselineSegment !== "before" && row.holdingDifference < 0 ? "positive" : ""}">${differenceText}</td>
         <td class="number">${row.dilutedCostAfter === null ? "—" : `¥ ${money(row.dilutedCostAfter, 4)}`}</td><td>${escapeHtml(row.note || "—")}</td>
-        <td><button class="table-action" data-edit="${row.id}">编辑</button><button class="table-action delete" data-delete="${row.id}">删除</button></td>
+        <td><button class="table-action" data-baseline="${row.id}" ${isAnchor ? "disabled title=\"请先移动或恢复基准\"" : ""}>${isAnchor ? "当前基准" : "设为基准"}</button><button class="table-action" data-edit="${row.id}" ${isAnchor ? "disabled title=\"请先移动或恢复基准\"" : ""}>编辑</button><button class="table-action delete" data-delete="${row.id}" ${isAnchor ? "disabled title=\"请先移动或恢复基准\"" : ""}>删除</button></td>
       </tr>`;
     }).join("");
   }
 
   function renderCharts(security, analysis) {
-    const costData = [{ label: "初始", cost: Number(security.initialCost), price: null, side: null }].concat(
+    const costData = [{ label: "基准", cost: Number(analysis.baseline.cost), price: null, side: null }].concat(
       analysis.rows.map((row) => ({ label: formatDate(row.datetime), cost: row.dilutedCostAfter, price: row.entryType === "trade" ? Number(row.price) : null, side: row.entryType === "trade" ? row.side : null }))
     );
     drawLineChart($("#costChart"), costData, [
@@ -229,7 +260,7 @@
         format: (v) => `¥${money(v, 4)}`,
       },
     ]);
-    const positionData = [{ label: "初始", position: 0, profit: 0 }].concat(
+    const positionData = [{ label: "基准", position: 0, profit: 0 }].concat(
       analysis.rows.map((row) => ({ label: formatDate(row.datetime), position: row.holdingDifference, profit: row.cumulativeClosedProfit }))
     );
     drawDualChart($("#positionChart"), positionData);
@@ -327,7 +358,7 @@
     const path = normalized.map((item, index) => `${index ? "L" : "M"}${frame.x(index, data.length)},${frame.y(item.profitNormalized)}`).join(" ");
     frame.svg.appendChild(svgElement("path", { d: path, fill: "none", stroke: "#1671c9", "stroke-width": 2.5, "stroke-linejoin": "round" }));
     normalized.forEach((item, index) => frame.svg.appendChild(svgElement("circle", { cx: frame.x(index, data.length), cy: frame.y(item.profitNormalized), r: 3, fill: "white", stroke: "#1671c9", "stroke-width": 2 })));
-    addTooltip(container, frame, data, (index) => `<strong>${data[index].label}</strong><br>较初始仓位：${signNumber(data[index].position, " 股")}<br>累计闭环收益：¥${money(data[index].profit)}`);
+    addTooltip(container, frame, data, (index) => `<strong>${data[index].label}</strong><br>较基准仓位：${signNumber(data[index].position, " 股")}<br>累计闭环收益：¥${money(data[index].profit)}`);
   }
 
   function openSecurityDialog(security) {
@@ -352,7 +383,8 @@
     if (!Number.isFinite(initialQuantity) || initialQuantity < 0 || initialQuantity % 100 !== 0) { el.securityError.textContent = "初始持仓应为 100 股的整数倍（也可为 0）"; return; }
     if (!Number.isFinite(initialCost) || initialCost < 0) { el.securityError.textContent = "初始持仓成本不能为负数"; return; }
     if (state.securities.some((item) => item.code === code && item.id !== id)) { el.securityError.textContent = "该股票代码已存在"; return; }
-    const security = { id: id || uid("sec"), code, name, initialQuantity, initialCost };
+    const existingSecurity = state.securities.find((item) => item.id === id);
+    const security = { ...existingSecurity, id: id || uid("sec"), code, name, initialQuantity, initialCost };
     if (id) {
       const historicalError = TradeEngine.validateTrade(
         security,
@@ -418,7 +450,30 @@
     resetTradeForm(); render();
   }
 
+  function setBaseline(id) {
+    const security = currentSecurity();
+    if (!security || security.baseline?.transactionId === id) return;
+    const snapshot = TradeEngine.createBaselineSnapshot(security, state.transactions, state.fees, id, analysisOptions());
+    if (!snapshot) { showToast("无法读取这条记录完成后的状态"); return; }
+    const costText = snapshot.quantity > 0 ? `¥${money(snapshot.cost, 4)} / 股` : "已清仓，成本归零";
+    const dividendText = state.includeDividendsInCost ? "计入成本" : "不计入成本";
+    if (!confirm(`将 ${formatDate(snapshot.datetime)} 完成后的状态设为当前基准？\n\n基准持仓：${number(snapshot.quantity)} 股\n基准成本：${costText}\n股息模式：${dividendText}\n\n该记录及此前流水保留为历史；FIFO、收益、费用、股息和仓位偏差从下一条记录重新累计。`)) return;
+    state.securities = state.securities.map((item) => item.id === security.id ? { ...item, baseline: snapshot } : item);
+    if (el.editingTradeId.value === id) resetTradeForm();
+    saveState("当前基准已移动，基准后数据已重新计算");
+    render();
+  }
+
+  function restoreOriginalBaseline() {
+    const security = currentSecurity();
+    if (!security?.baseline) return;
+    state.securities = state.securities.map((item) => item.id === security.id ? { ...item, baseline: null } : item);
+    saveState("已恢复原始初始状态为基准");
+    render();
+  }
+
   function editTrade(id) {
+    if (currentSecurity()?.baseline?.transactionId === id) { showToast("请先移动基准或恢复原始基准，再编辑这条记录"); return; }
     const trade = state.transactions.find((item) => item.id === id); if (!trade) return;
     const entryType = TradeEngine.transactionType(trade) === "trade" ? trade.side : trade.type;
     el.editingTradeId.value = trade.id; el.tradeDatetime.value = trade.datetime; el.tradeQuantity.value = trade.quantity ?? 100;
@@ -430,9 +485,16 @@
   }
 
   function deleteTrade(id) {
+    if (currentSecurity()?.baseline?.transactionId === id) { showToast("请先移动基准或恢复原始基准，再删除这条记录"); return; }
     const trade = state.transactions.find((item) => item.id === id); if (!trade) return;
     const entryType = TradeEngine.transactionType(trade) === "trade" ? trade.side : trade.type;
     const label = { buy: "买入", sell: "卖出", dividend: "分红入账", dividend_tax: "红利税" }[entryType];
+    if (entryType === "buy" || entryType === "sell") {
+      const remaining = state.transactions.filter((item) => item.id !== id);
+      const historyError = TradeEngine.validateTransactionHistory(currentSecurity(), remaining);
+      if (historyError) { showToast(`无法删除：${historyError}`); return; }
+    }
+
     if (!confirm(`确定删除 ${formatDate(trade.datetime)} 的这笔${label}记录吗？`)) return;
     state.transactions = state.transactions.filter((item) => item.id !== id);
     if (el.editingTradeId.value === id) resetTradeForm();
@@ -502,7 +564,8 @@
         if (parsed.version !== 1 || !Array.isArray(parsed.securities) || !Array.isArray(parsed.transactions)) throw new Error("format");
         if (!confirm("恢复备份将覆盖当前浏览器中的全部数据，是否继续？")) return;
         state = { ...structuredClone(EMPTY_STATE), ...parsed, fees: { ...DEFAULT_FEES, ...(parsed.fees || {}) } };
-        saveState("备份已恢复"); el.backupDialog.close(); resetTradeForm(); render();
+        const repaired = repairInvalidBaselines(state);
+        saveState(repaired ? "备份已恢复；无效基准已恢复为原始起点" : "备份已恢复"); el.backupDialog.close(); resetTradeForm(); render();
       } catch (_) { showToast("无法识别该备份文件"); }
     };
     reader.readAsText(file, "utf-8"); el.importFile.value = "";
@@ -512,12 +575,13 @@
   function exportCsv() {
     const security = currentSecurity(); if (!security) return;
     const analysis = TradeEngine.analyzeSecurity(security, state.transactions, state.fees, analysisOptions());
-    const header = ["记录时间","类型","数量(股)","成交价格","发生金额","佣金","过户费","印花税","总费用","记录后持仓","较初始仓位","摊薄成本","备注"];
-    const lines = [header, ...analysis.rows.map((row) => {
+    const header = ["记录时间","基准区段","类型","数量(股)","成交价格","发生金额","佣金","过户费","印花税","总费用","记录后持仓","较基准仓位","摊薄成本","备注"];
+    const lines = [header, ...analysis.historyRows.map((row) => {
       const type = row.entryType === "trade" ? row.side : row.entryType;
       const label = { buy: "买入", sell: "卖出", dividend: "分红入账", dividend_tax: "股息红利税" }[type];
       const amount = row.entryType === "trade" ? row.fees.gross : (type === "dividend" ? row.amount : -row.amount);
-      return [row.datetime,label,row.entryType === "trade" ? row.quantity : "",row.entryType === "trade" ? Number(row.price).toFixed(4) : "",amount,row.fees.commission,row.fees.transferFee,row.fees.stampDuty,row.fees.total,row.holdingAfter,row.holdingDifference,row.dilutedCostAfter === null ? "" : Number(row.dilutedCostAfter).toFixed(4),row.note || ""];
+      const segment = { before: "基准前", baseline: "当前基准", after: "基准后" }[row.baselineSegment];
+      return [row.datetime,segment,label,row.entryType === "trade" ? row.quantity : "",row.entryType === "trade" ? Number(row.price).toFixed(4) : "",amount,row.fees.commission,row.fees.transferFee,row.fees.stampDuty,row.fees.total,row.holdingAfter,row.baselineSegment === "before" ? "" : row.holdingDifference,row.dilutedCostAfter === null ? "" : Number(row.dilutedCostAfter).toFixed(4),row.note || ""];
     })];
     download(`${security.code}_${security.name}_交易流水.csv`, "\ufeff" + lines.map((line) => line.map(csvCell).join(",")).join("\r\n"), "text/csv;charset=utf-8");
     showToast("当前股票流水已导出");
@@ -741,7 +805,8 @@
   el.tradeForm.addEventListener("submit", saveTrade); el.cancelEditButton.addEventListener("click", resetTradeForm);
   [el.tradeQuantity, el.tradePrice, el.cashAmount].forEach((input) => input.addEventListener("input", updateTradePreview));
   $$("input[name='entryType']").forEach((input) => input.addEventListener("input", updateEntryFormMode));
-  el.transactionsBody.addEventListener("click", (event) => { const editId = event.target.dataset.edit, deleteId = event.target.dataset.delete; if (editId) editTrade(editId); if (deleteId) deleteTrade(deleteId); });
+  el.transactionsBody.addEventListener("click", (event) => { const baselineId = event.target.dataset.baseline, editId = event.target.dataset.edit, deleteId = event.target.dataset.delete; if (baselineId) setBaseline(baselineId); if (editId) editTrade(editId); if (deleteId) deleteTrade(deleteId); });
+  el.restoreBaselineButton.addEventListener("click", restoreOriginalBaseline);
   el.sideFilter.addEventListener("change", render);
   el.dividendModeButton.addEventListener("click", toggleDividendMode);
   $("#feeButton").addEventListener("click", openFeeDialog); el.feeForm.addEventListener("submit", saveFees);
@@ -765,4 +830,5 @@
   el.tradeDatetime.value = nowForInput();
   updateEntryFormMode();
   render();
+  if (repairedOnLoad) saveState("无效基准已恢复为原始初始状态");
 })();

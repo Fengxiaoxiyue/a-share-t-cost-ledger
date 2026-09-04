@@ -144,3 +144,98 @@ test("仓位估值忽略最新的股息记录，继续采用最近成交价", ()
   assert.equal(allocation.securityValue, 13200);
   assert.equal(allocation.totalValue, 13200);
 });
+
+test("移动基准后只统计锚点之后的流水并重置全部累计项", () => {
+  const records = [
+    trade("t1", "2026-09-01T10:00", "buy", 100, 9.8),
+    trade("t2", "2026-09-01T14:00", "sell", 100, 10),
+    cash("t3", "2026-09-02T16:00", "dividend", 50),
+    trade("t4", "2026-09-03T10:00", "buy", 100, 9.5),
+  ];
+  const snapshot = engine.createBaselineSnapshot(security, records, fees, "t3", { includeDividendsInCost: true });
+  const result = engine.analyzeSecurity({ ...security, baseline: snapshot }, records, fees, { includeDividendsInCost: true });
+
+  assert.equal(result.baseline.transactionId, "t3");
+  assert.equal(result.rows.length, 1);
+  assert.equal(result.rows[0].id, "t4");
+  assert.equal(result.cumulativeClosedProfit, 0);
+  assert.equal(result.cumulativeFees, 5.01);
+  assert.equal(result.cumulativeDividend, 0);
+  assert.equal(result.netDividend, 0);
+  assert.deepEqual(result.unmatched, { buy: 100, sell: 0 });
+  assert.deepEqual(result.historyRows.map((row) => row.baselineSegment), ["before", "before", "baseline", "after"]);
+});
+
+test("基准快照固定，可向前向后移动并恢复原始起点", () => {
+  const records = [
+    trade("t1", "2026-09-01T10:00", "buy", 100, 9.8),
+    trade("t2", "2026-09-01T14:00", "sell", 100, 10),
+    trade("t3", "2026-09-02T10:00", "buy", 100, 9.6),
+  ];
+  const snapshot = engine.createBaselineSnapshot(security, records, fees, "t2");
+  const changed = [{ ...records[0], price: 8.8 }, records[1], records[2]];
+  const fixed = engine.analyzeSecurity({ ...security, baseline: snapshot }, changed, fees);
+  assert.equal(fixed.baseline.cost, snapshot.cost);
+
+  const movedBack = engine.createBaselineSnapshot({ ...security, baseline: snapshot }, changed, fees, "t1");
+  const originalChanged = engine.analyzeSecurity(security, changed, fees);
+  assert.equal(movedBack.cost, originalChanged.historyRows[0].dilutedCostAfter);
+
+  const restored = engine.analyzeSecurity({ ...security, baseline: null }, changed, fees);
+  assert.equal(restored.baseline.isCustom, false);
+  assert.equal(restored.rows.length, 3);
+});
+
+test("所有记录类型都可生成基准快照，清仓基准以零成本重新开始", () => {
+  const records = [
+    cash("t1", "2026-09-01T09:00", "dividend", 20),
+    cash("t2", "2026-09-01T09:30", "dividend_tax", 2),
+    trade("t3", "2026-09-01T10:00", "sell", 1000, 12),
+    trade("t4", "2026-09-02T10:00", "buy", 100, 9),
+  ];
+  for (const item of records) {
+    assert.ok(engine.createBaselineSnapshot(security, records, fees, item.id, { includeDividendsInCost: true }));
+  }
+  const snapshot = engine.createBaselineSnapshot(security, records, fees, "t3", { includeDividendsInCost: true });
+  assert.equal(snapshot.quantity, 0);
+  assert.equal(snapshot.cost, 0);
+  const result = engine.analyzeSecurity({ ...security, baseline: snapshot }, records, fees, { includeDividendsInCost: true });
+  assert.equal(result.currentHolding, 100);
+  assert.equal(result.dilutedCost, 9.0501);
+  assert.equal(result.cumulativeDividend, 0);
+});
+
+test("FIFO 不跨越基准边界，且基准后持仓单独校验", () => {
+  const records = [
+    trade("t1", "2026-09-01T10:00", "sell", 100, 10.2),
+    trade("t2", "2026-09-01T14:00", "buy", 100, 9.9),
+  ];
+  const snapshot = engine.createBaselineSnapshot(security, records, fees, "t1");
+  const result = engine.analyzeSecurity({ ...security, baseline: snapshot }, records, fees);
+  assert.equal(result.loops.length, 0);
+  assert.deepEqual(result.unmatched, { buy: 100, sell: 0 });
+
+  const constrained = { ...security, baseline: { transactionId: "t2", datetime: records[1].datetime, quantity: 500, cost: 10 } };
+  const history = [trade("t1", "2026-09-01T10:00", "buy", 1000, 9), cash("t2", "2026-09-01T11:00", "dividend", 10)];
+  assert.match(engine.validateTrade(constrained, history, trade("t3", "2026-09-01T12:00", "sell", 1000, 10)), /基准后/);
+});
+
+test("基准后没有新成交时，组合估值采用固定基准成本", () => {
+  const records = [trade("t1", "2026-09-01T10:00", "buy", 100, 12)];
+  const snapshot = engine.createBaselineSnapshot(security, records, fees, "t1");
+  const basedSecurity = { ...security, baseline: snapshot };
+  const allocation = engine.calculatePortfolioAllocation([basedSecurity], records, fees, "s1");
+  assert.equal(allocation.securityValue, engine.roundMoney(snapshot.quantity * snapshot.cost));
+  assert.equal(allocation.weight, 100);
+});
+
+test("无效基准安全回退，统一历史校验可用于删除前检查", () => {
+  const records = [trade("t1", "2026-09-01T10:00", "sell", 1000, 10)];
+  const invalid = engine.analyzeSecurity({ ...security, baseline: { transactionId: "missing", quantity: 1000, cost: 10 } }, records, fees);
+  assert.equal(invalid.baseline.isCustom, false);
+  assert.equal(invalid.baseline.invalid, true);
+  assert.equal(invalid.rows.length, 1);
+
+  const unsafeAfterDelete = [trade("t2", "2026-09-01T11:00", "sell", 1100, 10)];
+  assert.match(engine.validateTransactionHistory(security, unsafeAfterDelete), /历史持仓/);
+});
