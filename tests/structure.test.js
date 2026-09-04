@@ -43,7 +43,7 @@ test("Windows 启动入口以独立应用窗口打开本地工具", () => {
 });
 
 test("移动基准界面包含状态栏、恢复入口、流水操作和 CSV 区段", () => {
-  assert.match(html, /v1\.3\.0-beta\.1 测试版/);
+  assert.match(html, /v1\.3\.0-beta\.2 测试版/);
   assert.match(html, /id="baselineStatus"/);
   assert.match(html, /id="restoreBaselineButton"/);
   assert.match(html, /较基准/);

@@ -2,9 +2,9 @@
 
 一个免费、开源、无需安装的本地网页工具，用于记录沪深 A 股做 T 交易，并自动计算 FIFO 闭环收益、交易费用和摊薄持仓成本。
 
-> **v1.3.0-beta.1 测试版提示：**“可移动基准”会把锚点记录及此前流水排除出当前周期累计，这一统计口径仍在验证和讨论，后续可能调整。请先导出 JSON 备份，再按需下载使用。
+> **v1.3.0-beta.2 测试版提示：**“可移动基准”会把锚点记录及此前流水排除出当前周期累计，这一统计口径仍在验证和讨论，后续可能调整。请先导出 JSON 备份，再按需下载使用。
 
-测试版可从 [v1.3.0-beta.1 Pre-release](https://github.com/Fengxiaoxiyue/a-share-t-cost-ledger/releases/tag/v1.3.0-beta.1) 按需下载；稳定版仍保留在 Releases 的 Latest 入口。
+测试版可从 [v1.3.0-beta.2 Pre-release](https://github.com/Fengxiaoxiyue/a-share-t-cost-ledger/releases/tag/v1.3.0-beta.2) 按需下载；稳定版仍保留在 Releases 的 Latest 入口。
 
 > 数据只保存在你的浏览器中，不会上传到服务器。本工具仅用于交易记录与计算，不构成任何投资建议；实际费用和成交结果请以券商账单为准。
 
@@ -12,7 +12,7 @@
 
 ### 方式一：在线使用
 
-打开 [在线版](https://fengxiaoxiyue.github.io/a-share-t-cost-ledger/) 即可使用。当前在线版跟随 `main`，本次发布后将显示 v1.3.0-beta.1 测试版标识。
+打开 [在线版](https://fengxiaoxiyue.github.io/a-share-t-cost-ledger/) 即可使用。当前在线版跟随 `main`，本次发布后将显示 v1.3.0-beta.2 测试版标识。
 
 ### 方式二：下载到电脑使用
 
