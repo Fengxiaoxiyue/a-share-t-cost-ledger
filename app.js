@@ -206,12 +206,19 @@
   }
 
   function renderCharts(security, analysis) {
-    const costData = [{ label: "初始", cost: Number(security.initialCost), price: null }].concat(
-      analysis.rows.map((row) => ({ label: formatDate(row.datetime), cost: row.dilutedCostAfter, price: row.entryType === "trade" ? Number(row.price) : null }))
+    const costData = [{ label: "初始", cost: Number(security.initialCost), price: null, side: null }].concat(
+      analysis.rows.map((row) => ({ label: formatDate(row.datetime), cost: row.dilutedCostAfter, price: row.entryType === "trade" ? Number(row.price) : null, side: row.entryType === "trade" ? row.side : null }))
     );
     drawLineChart($("#costChart"), costData, [
       { key: "cost", label: "摊薄成本", color: "#1671c9", format: (v) => `¥${money(v, 4)}` },
-      { key: "price", label: "成交价", color: "#c67b12", format: (v) => `¥${money(v, 4)}` },
+      {
+        key: "price",
+        label: "成交价",
+        color: "#c67b12",
+        pointColor: (item) => item.side === "buy" ? "#d84a4a" : item.side === "sell" ? "#16887b" : "#c67b12",
+        pointRadius: 3.6,
+        format: (v) => `¥${money(v, 4)}`,
+      },
     ]);
     const positionData = [{ label: "初始", position: 0, profit: 0 }].concat(
       analysis.rows.map((row) => ({ label: formatDate(row.datetime), position: row.holdingDifference, profit: row.cumulativeClosedProfit }))
@@ -279,16 +286,18 @@
     const frame = chartFrame(container, values, false, 4);
     if (!frame) return;
     series.forEach((entry) => {
-      let path = "", drawing = false;
+      let path = "", hasPoint = false;
       data.forEach((item, index) => {
         const value = item[entry.key];
-        if (value === null || !Number.isFinite(Number(value))) { drawing = false; return; }
-        path += `${drawing ? "L" : "M"}${frame.x(index, data.length)},${frame.y(Number(value))} `; drawing = true;
+        if (value === null || !Number.isFinite(Number(value))) return;
+        path += `${hasPoint ? "L" : "M"}${frame.x(index, data.length)},${frame.y(Number(value))} `;
+        hasPoint = true;
       });
       frame.svg.appendChild(svgElement("path", { d: path, fill: "none", stroke: entry.color, "stroke-width": 2.5, "stroke-linejoin": "round", "stroke-linecap": "round" }));
       data.forEach((item, index) => {
-        if (item[entry.key] === null) return;
-        frame.svg.appendChild(svgElement("circle", { cx: frame.x(index, data.length), cy: frame.y(Number(item[entry.key])), r: 3, fill: "white", stroke: entry.color, "stroke-width": 2 }));
+        if (item[entry.key] === null || !Number.isFinite(Number(item[entry.key]))) return;
+        const pointColor = entry.pointColor ? entry.pointColor(item) : entry.color;
+        frame.svg.appendChild(svgElement("circle", { cx: frame.x(index, data.length), cy: frame.y(Number(item[entry.key])), r: entry.pointRadius || 3, fill: "white", stroke: pointColor, "stroke-width": 2.4 }));
       });
     });
     addTooltip(container, frame, data, (index) => `<strong>${data[index].label}</strong><br>${series.filter((s) => data[index][s.key] !== null).map((s) => `${s.label}：${s.format(data[index][s.key])}`).join("<br>")}`);

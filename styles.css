@@ -134,7 +134,10 @@ select:focus, input:focus { border-color: var(--blue-500); box-shadow: 0 0 0 3px
 .legend { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 11px; white-space: nowrap; }
 .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; margin-left: 5px; }
 .dot.cost { background: var(--blue-600); }
-.dot.price { background: var(--warn); }
+.dot.buy { background: var(--buy); }
+.dot.sell { background: var(--sell); }
+.line-key { width: 13px; height: 0; display: inline-block; margin-left: 5px; border-top: 2px solid; }
+.line-key.price { border-color: var(--warn); }
 .chart-tooltip {
   position: absolute; pointer-events: none; z-index: 4; padding: 8px 10px; border-radius: 7px;
   background: rgba(7,24,43,.94); color: white; font-size: 11px; line-height: 1.55;
