@@ -70,7 +70,7 @@
 ### 首次运行
 
 1. 在 PowerShell 中运行 `scripts\install-umi-ocr.ps1`。脚本只访问 Umi-OCR 官方 GitHub Release，自动选择最新稳定 Rapid 版、校验发布页 SHA-256，并安装到 `%LOCALAPPDATA%\Programs\Umi-OCR\`。
-2. 双击 `start-local.cmd`。它会检测本机 OCR 服务；未运行时自动启动 Umi-OCR，然后打开股票工具。
+2. 双击 `start-local.cmd`。它会检测本机 OCR 服务；未运行时自动启动 Umi-OCR，然后以独立应用窗口打开股票工具。
 3. 在网页点击“截图 OCR 导入”，确认状态显示“Umi-OCR ● 已连接”。
 
 已安装后，日常只需双击 `start-local.cmd`。

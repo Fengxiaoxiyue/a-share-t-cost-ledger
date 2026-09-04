@@ -45,7 +45,7 @@ if (-not $listener -or $listener.LocalAddress -notin @("127.0.0.1", "::1")) {
 $indexPath = Join-Path $PSScriptRoot "index.html"
 $indexUri = ([Uri]$indexPath).AbsoluteUri
 $encodedBaseUrl = [Uri]::EscapeDataString($BaseUrl)
-$toolUri = "$indexUri?umiOcrBaseUrl=$encodedBaseUrl"
+$toolUri = "${indexUri}?umiOcrBaseUrl=$encodedBaseUrl"
 $browserCandidates = @(
     (Join-Path $env:ProgramFiles "Google\Chrome\Application\chrome.exe"),
     (Join-Path ${env:ProgramFiles(x86)} "Google\Chrome\Application\chrome.exe"),
@@ -54,7 +54,8 @@ $browserCandidates = @(
 )
 $browserPath = $browserCandidates | Where-Object { $_ -and (Test-Path -LiteralPath $_) } | Select-Object -First 1
 if ($browserPath) {
-    Start-Process -FilePath $browserPath -ArgumentList @($toolUri)
+    # Use browser app mode so the local tool opens as its own program window.
+    Start-Process -FilePath $browserPath -ArgumentList @("--app=$toolUri", "--start-maximized")
 } else {
     Start-Process -FilePath "explorer.exe" -ArgumentList @($toolUri)
 }

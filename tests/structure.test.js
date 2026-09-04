@@ -8,6 +8,7 @@ const html = fs.readFileSync(path.join(root, "index.html"), "utf8");
 const app = fs.readFileSync(path.join(root, "app.js"), "utf8");
 const umiOcr = fs.readFileSync(path.join(root, "umi-ocr.js"), "utf8");
 const parser = fs.readFileSync(path.join(root, "trade-screenshot-parser.js"), "utf8");
+const launcher = fs.readFileSync(path.join(root, "start-local.ps1"), "utf8");
 
 test("页面脚本引用的静态 ID 均存在", () => {
   const selectorIds = [...app.matchAll(/\$\(["']#([A-Za-z][\w-]*)["']\)/g)].map((match) => match[1]);
@@ -33,4 +34,10 @@ test("OCR 图片仅发送到 localhost，且导入前存在人工确认步骤", 
   assert.match(html, /id="ocrConfirmButton"/);
   assert.match(app, /confirmOcrImport/);
   assert.doesNotMatch(app, /console\.log/);
+});
+
+test("Windows 启动入口以独立应用窗口打开本地工具", () => {
+  assert.match(launcher, /\$toolUri = "\$\{indexUri\}\?umiOcrBaseUrl=/);
+  assert.match(launcher, /--app=\$toolUri/);
+  assert.match(launcher, /Start-Process -FilePath \$browserPath/);
 });
