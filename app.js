@@ -22,9 +22,18 @@
     securityDialog: $("#securityDialog"), securityForm: $("#securityForm"), securityId: $("#securityId"), securityDialogTitle: $("#securityDialogTitle"),
     securityCode: $("#securityCode"), securityName: $("#securityName"), initialQuantity: $("#initialQuantity"), initialCost: $("#initialCost"), securityError: $("#securityError"), deleteSecurityButton: $("#deleteSecurityButton"),
     feeDialog: $("#feeDialog"), feeForm: $("#feeForm"), backupDialog: $("#backupDialog"), importFile: $("#importFile"), toast: $("#toast"),
+    ocrDialog: $("#ocrDialog"), ocrStatus: $("#ocrStatus"), ocrBaseUrl: $("#ocrBaseUrl"), ocrRetryButton: $("#ocrRetryButton"),
+    ocrFileInput: $("#ocrFileInput"), ocrDropZone: $("#ocrDropZone"), ocrPreview: $("#ocrPreview"), ocrPreviewImage: $("#ocrPreviewImage"), ocrProgress: $("#ocrProgress"),
+    ocrResultHeading: $("#ocrResultHeading"), ocrResultSummary: $("#ocrResultSummary"), ocrReviewWrap: $("#ocrReviewWrap"), ocrReviewBody: $("#ocrReviewBody"),
+    ocrClearButton: $("#ocrClearButton"), ocrConfirmButton: $("#ocrConfirmButton"), ocrConfirmHint: $("#ocrConfirmHint"), ocrError: $("#ocrError"),
   };
   let state = loadState();
   let toastTimer;
+  let ocrRows = [];
+  let ocrConnected = false;
+  let ocrBusy = false;
+  let ocrPreviewUrl = "";
+  let ocrSkippedCount = 0;
 
   function loadState() {
     try {
@@ -514,6 +523,216 @@
     showToast("当前股票流水已导出");
   }
 
+  function setOcrStatus(status, message) {
+    ocrConnected = status === "connected";
+    el.ocrStatus.className = `ocr-status ${status}`;
+    el.ocrStatus.textContent = message;
+    el.ocrDropZone.disabled = ocrBusy || !ocrConnected;
+  }
+
+  async function checkOcrConnection() {
+    setOcrStatus("checking", "Umi-OCR ● 检测中");
+    el.ocrBaseUrl.textContent = UmiOcr.configuredBaseUrl().replace(/^http:\/\//, "");
+    const result = await UmiOcr.checkConnection();
+    if (result.connected) {
+      setOcrStatus("connected", "Umi-OCR ● 已连接");
+      el.ocrProgress.textContent = ocrRows.length ? "识别已完成，请逐笔校对。" : "可拖入券商成交截图开始识别。";
+      el.ocrError.textContent = "";
+    } else {
+      setOcrStatus("offline", "Umi-OCR ● 未运行");
+      el.ocrProgress.textContent = "未检测到本机 Umi-OCR。请启动 Umi-OCR 后重试。默认服务地址：127.0.0.1:1224";
+    }
+    return result.connected;
+  }
+
+  function releaseOcrPreview() {
+    if (ocrPreviewUrl) URL.revokeObjectURL(ocrPreviewUrl);
+    ocrPreviewUrl = "";
+  }
+
+  function clearOcrReview() {
+    releaseOcrPreview();
+    ocrRows = [];
+    ocrSkippedCount = 0;
+    el.ocrFileInput.value = "";
+    el.ocrPreviewImage.hidden = true;
+    el.ocrPreviewImage.removeAttribute("src");
+    el.ocrPreview.querySelector("span").hidden = false;
+    el.ocrResultHeading.hidden = true;
+    el.ocrReviewWrap.hidden = true;
+    el.ocrReviewBody.innerHTML = "";
+    el.ocrError.textContent = "";
+    el.ocrConfirmButton.disabled = true;
+    el.ocrConfirmHint.textContent = "OCR 结果必须逐笔校对";
+    el.ocrProgress.textContent = ocrConnected ? "可拖入券商成交截图开始识别。" : "连接 Umi-OCR 后即可开始。";
+  }
+
+  function findSecurityForOcr(trade) {
+    if (trade.symbol) return state.securities.find((item) => item.code === trade.symbol)?.id || "";
+    if (trade.stockName) return state.securities.find((item) => item.name === trade.stockName)?.id || "";
+    return "";
+  }
+
+  function securityOptions(selectedId) {
+    return `<option value="">请选择</option>` + state.securities.map((security) => `<option value="${security.id}" ${security.id === selectedId ? "selected" : ""}>${escapeHtml(security.code)} · ${escapeHtml(security.name)}</option>`).join("");
+  }
+
+  function candidateFromOcr(row, index) {
+    const common = {
+      id: `ocr_validation_${row.id}`,
+      securityId: row.securityId,
+      datetime: row.datetime,
+      sequence: Date.now() + index,
+      source: "ocr",
+      note: "OCR 截图导入",
+    };
+    if (isCashEntry(row.entryType)) return { ...common, type: row.entryType, amount: Number(row.amount) };
+    return { ...common, type: "trade", side: row.entryType, quantity: Number(row.quantity), price: Number(row.price) };
+  }
+
+  function validateOcrRows() {
+    const pending = [];
+    const existingFingerprints = new Set(state.transactions.map(TradeScreenshotParser.fingerprint));
+    const pendingFingerprints = new Set();
+    const chronologicalRows = ocrRows.map((row, index) => ({ row, index })).sort((a, b) => String(a.row.datetime || "").localeCompare(String(b.row.datetime || "")) || a.index - b.index);
+    chronologicalRows.forEach(({ row, index }) => {
+      const errors = [], warnings = [...(row.parserWarnings || [])];
+      const security = state.securities.find((item) => item.id === row.securityId);
+      const cash = isCashEntry(row.entryType);
+      if (!security) errors.push("请选择已添加的股票");
+      if (!row.datetime) errors.push("缺少记录时间");
+      if (!row.entryType) errors.push("缺少记录类型");
+      if (cash && !(Number(row.amount) > 0)) errors.push("金额必须大于 0");
+      if (!cash && !(Number(row.price) > 0)) errors.push("价格必须大于 0");
+      if (!cash && !(Number(row.quantity) > 0)) errors.push("数量必须大于 0");
+      if (security && row.symbol && security.code !== row.symbol) warnings.push(`截图代码 ${row.symbol} 与所选股票不一致`);
+      if (security && row.stockName && security.name !== row.stockName) warnings.push(`截图名称 ${row.stockName} 与所选股票不一致`);
+      if (!cash && Number(row.price) > 0 && Number(row.quantity) > 0 && Number(row.amount) > 0) {
+        const expected = Number(row.price) * Number(row.quantity);
+        if (Math.abs(expected - Number(row.amount)) > Math.max(0.05, Number(row.amount) * 0.005)) warnings.push(`金额不一致，应为 ${expected.toFixed(2)}`);
+      }
+      const candidate = candidateFromOcr(row, index);
+      if (!errors.length) {
+        const engineError = cash
+          ? TradeEngine.validateCashEntry(candidate)
+          : TradeEngine.validateTrade(security, state.transactions.concat(pending), candidate);
+        if (engineError) errors.push(engineError);
+      }
+      const fingerprint = TradeScreenshotParser.fingerprint(candidate);
+      row.duplicate = existingFingerprints.has(fingerprint) || pendingFingerprints.has(fingerprint);
+      if (row.duplicate) warnings.push("疑似重复记录；如仍勾选导入即表示确认保留");
+      row.errors = [...new Set(errors)];
+      row.warnings = [...new Set(warnings)];
+      if (row.selected && !row.errors.length) {
+        pending.push(candidate);
+        pendingFingerprints.add(fingerprint);
+      }
+    });
+  }
+
+  function renderOcrRows() {
+    validateOcrRows();
+    el.ocrReviewBody.innerHTML = ocrRows.map((row, index) => {
+      const cash = isCashEntry(row.entryType);
+      const status = row.errors.length ? row.errors.join("；") : row.warnings.length ? row.warnings.join("；") : "校验通过";
+      const statusClass = row.errors.length ? "error" : row.warnings.length ? "warning" : "ok";
+      const rowClass = `${row.errors.length ? "has-error" : row.warnings.length ? "has-warning" : ""} ${Number(row.confidence) < .85 ? "low-confidence" : ""}`;
+      const confidence = Number.isFinite(Number(row.confidence)) ? `OCR 置信度 ${(Number(row.confidence) * 100).toFixed(1)}%` : "";
+      return `<tr data-index="${index}" class="${rowClass}">
+        <td><input type="checkbox" data-field="selected" ${row.selected ? "checked" : ""} aria-label="导入第 ${index + 1} 笔" /></td>
+        <td><select class="ocr-security" data-field="securityId">${securityOptions(row.securityId)}</select></td>
+        <td><input class="ocr-datetime" type="datetime-local" step="1" data-field="datetime" value="${escapeHtml(row.datetime || "")}" /></td>
+        <td><select data-field="entryType"><option value="">请选择</option><option value="buy" ${row.entryType === "buy" ? "selected" : ""}>买入</option><option value="sell" ${row.entryType === "sell" ? "selected" : ""}>卖出</option><option value="dividend" ${row.entryType === "dividend" ? "selected" : ""}>分红</option><option value="dividend_tax" ${row.entryType === "dividend_tax" ? "selected" : ""}>红利税</option></select></td>
+        <td><input type="number" min="0.0001" step="0.0001" data-field="price" value="${row.price ?? ""}" ${cash ? "disabled" : ""} /></td>
+        <td><input type="number" min="100" step="100" data-field="quantity" value="${row.quantity ?? ""}" ${cash ? "disabled" : ""} /></td>
+        <td><input type="number" min="0" step="0.01" data-field="amount" value="${row.amount ?? ""}" /></td>
+        <td class="ocr-row-status ${statusClass}">${escapeHtml(status)}<span class="ocr-confidence">${confidence}</span></td>
+      </tr>`;
+    }).join("");
+    const selected = ocrRows.filter((row) => row.selected);
+    const validSelected = selected.filter((row) => !row.errors.length);
+    el.ocrConfirmButton.disabled = ocrBusy || !selected.length || validSelected.length !== selected.length;
+    el.ocrConfirmHint.textContent = selected.length ? `已选择 ${selected.length} 笔，其中 ${validSelected.length} 笔可导入` : "请至少选择一条记录";
+    el.ocrResultHeading.hidden = !ocrRows.length;
+    el.ocrReviewWrap.hidden = !ocrRows.length;
+    const tradeCount = ocrRows.filter((row) => !isCashEntry(row.entryType)).length;
+    const cashCount = ocrRows.length - tradeCount;
+    el.ocrResultSummary.textContent = `识别 ${ocrRows.length} 条记录（买卖 ${tradeCount}，股息相关 ${cashCount}）${ocrSkippedCount ? `，跳过 ${ocrSkippedCount} 条无法确认的记录` : ""}`;
+  }
+
+  function syncOcrRowsFromDom() {
+    [...el.ocrReviewBody.querySelectorAll("tr[data-index]")].forEach((tr) => {
+      const row = ocrRows[Number(tr.dataset.index)];
+      if (!row) return;
+      tr.querySelectorAll("[data-field]").forEach((input) => {
+        const field = input.dataset.field;
+        row[field] = field === "selected" ? input.checked : ["price", "quantity", "amount"].includes(field) ? (input.value === "" ? undefined : Number(input.value)) : input.value;
+      });
+    });
+  }
+
+  async function processOcrFiles(fileList) {
+    if (ocrBusy) return;
+    const files = [...fileList].filter((file) => file.type.startsWith("image/"));
+    if (!files.length) { el.ocrError.textContent = "请选择 PNG、JPG、WebP 或 BMP 图片"; return; }
+    if (!await checkOcrConnection()) return;
+    ocrBusy = true;
+    el.ocrDropZone.disabled = true;
+    el.ocrConfirmButton.disabled = true;
+    el.ocrError.textContent = "";
+    releaseOcrPreview();
+    ocrPreviewUrl = URL.createObjectURL(files[0]);
+    el.ocrPreviewImage.src = ocrPreviewUrl;
+    el.ocrPreviewImage.hidden = false;
+    el.ocrPreview.querySelector("span").hidden = true;
+    ocrRows = [];
+    ocrSkippedCount = 0;
+    try {
+      for (let index = 0; index < files.length; index += 1) {
+        const file = files[index];
+        el.ocrProgress.textContent = `正在识别第 ${index + 1} / ${files.length} 张：${file.name}`;
+        const result = await UmiOcr.recognizeImage(file);
+        const parsed = TradeScreenshotParser.parseOcrBlocks(result.blocks, { sourceImageId: `image_${index + 1}` });
+        ocrSkippedCount += parsed.skippedRows.length;
+        parsed.records.forEach((record) => {
+          const securityId = findSecurityForOcr(record);
+          const candidate = { ...record, securityId };
+          const duplicate = securityId && state.transactions.some((item) => TradeScreenshotParser.fingerprint(item) === TradeScreenshotParser.fingerprint(candidate));
+          ocrRows.push({ id: uid("ocr"), ...record, securityId, selected: !duplicate, parserWarnings: record.warnings || [] });
+        });
+      }
+      el.ocrProgress.textContent = ocrRows.length ? "识别完成。请核对每个字段，确认后再导入。" : "未识别到可导入记录。";
+      if (!ocrRows.length) el.ocrError.textContent = "截图中没有解析出完整交易或股息记录；请确认截图包含日期、类型和金额等字段。";
+      renderOcrRows();
+    } catch (error) {
+      el.ocrError.textContent = error.message || "OCR 识别失败";
+      el.ocrProgress.textContent = "识别未完成，没有写入任何交易数据。";
+    } finally {
+      ocrBusy = false;
+      el.ocrDropZone.disabled = !ocrConnected;
+      if (ocrRows.length) renderOcrRows();
+    }
+  }
+
+  function confirmOcrImport() {
+    syncOcrRowsFromDom();
+    validateOcrRows();
+    const selected = ocrRows.filter((row) => row.selected);
+    if (!selected.length) { el.ocrError.textContent = "请至少选择一条记录"; return; }
+    if (selected.some((row) => row.errors.length)) { el.ocrError.textContent = "仍有未通过校验的记录，请修正后再导入"; renderOcrRows(); return; }
+    const imported = selected.map(candidateFromOcr);
+    state.transactions.push(...imported);
+    saveState(`已从截图导入 ${imported.length} 条记录并重新计算`);
+    clearOcrReview();
+    el.ocrDialog.close();
+    render();
+  }
+
+  async function openOcrDialog() {
+    el.ocrDialog.showModal();
+    await checkOcrConnection();
+  }
+
   $("#addSecurityButton").addEventListener("click", () => openSecurityDialog());
   $("#emptyAddButton").addEventListener("click", () => openSecurityDialog());
   $("#editSecurityButton").addEventListener("click", () => openSecurityDialog(currentSecurity()));
@@ -529,6 +748,17 @@
   $("#backupButton").addEventListener("click", () => el.backupDialog.showModal()); $("#closeBackupButton").addEventListener("click", () => el.backupDialog.close());
   $("#exportJsonButton").addEventListener("click", exportBackup); $("#importJsonButton").addEventListener("click", () => el.importFile.click());
   el.importFile.addEventListener("change", () => importBackup(el.importFile.files[0])); $("#exportCsvButton").addEventListener("click", exportCsv);
+  $("#ocrImportButton").addEventListener("click", openOcrDialog);
+  el.ocrRetryButton.addEventListener("click", checkOcrConnection);
+  el.ocrDropZone.addEventListener("click", () => el.ocrFileInput.click());
+  el.ocrFileInput.addEventListener("change", () => processOcrFiles(el.ocrFileInput.files));
+  el.ocrClearButton.addEventListener("click", clearOcrReview);
+  el.ocrConfirmButton.addEventListener("click", confirmOcrImport);
+  el.ocrReviewBody.addEventListener("change", () => { syncOcrRowsFromDom(); renderOcrRows(); });
+  ["dragenter", "dragover"].forEach((name) => el.ocrDropZone.addEventListener(name, (event) => { event.preventDefault(); el.ocrDropZone.classList.add("dragging"); }));
+  ["dragleave", "drop"].forEach((name) => el.ocrDropZone.addEventListener(name, (event) => { event.preventDefault(); el.ocrDropZone.classList.remove("dragging"); }));
+  el.ocrDropZone.addEventListener("drop", (event) => processOcrFiles(event.dataTransfer.files));
+  el.ocrDialog.addEventListener("close", () => { if (!ocrBusy) clearOcrReview(); });
   $$('[data-close]').forEach((button) => button.addEventListener("click", () => document.getElementById(button.dataset.close).close()));
   window.addEventListener("resize", () => { if (currentSecurity()) renderCharts(currentSecurity(), TradeEngine.analyzeSecurity(currentSecurity(), state.transactions, state.fees, analysisOptions())); });
 

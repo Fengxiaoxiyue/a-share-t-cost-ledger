@@ -16,3 +16,8 @@ Thumbs.db
 *_交易流水.csv
 A股做T成本簿_备份_*.json
 *.zip
+
+# Local OCR installation, configuration and test inputs
+/Umi-OCR*/
+/config.local.js
+/test-transaction-screenshot.jpg

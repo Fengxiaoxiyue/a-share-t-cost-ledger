@@ -6,6 +6,7 @@
     <meta name="description" content="A 股小额做 T 交易、FIFO 闭环收益与摊薄持仓成本跟踪工具" />
     <title>A 股做 T 成本簿</title>
     <link rel="stylesheet" href="styles.css" />
+    <link rel="stylesheet" href="ocr-styles.css" />
   </head>
   <body>
     <header class="topbar">
@@ -31,6 +32,7 @@
         </div>
         <div class="security-actions">
           <button class="button dividend-mode" id="dividendModeButton" type="button" aria-pressed="false" title="切换现金分红和股息红利税是否回摊至当前持仓成本">股息模式：不计入成本</button>
+          <button class="button subtle" id="ocrImportButton" type="button">截图 OCR 导入</button>
           <button class="button subtle" id="editSecurityButton">编辑股票</button>
           <button class="button primary" id="addSecurityButton">＋ 添加股票</button>
         </div>
@@ -216,8 +218,58 @@
       </div>
     </dialog>
 
+    <dialog id="ocrDialog" class="wide-dialog">
+      <div class="dialog-form ocr-dialog-body">
+        <div class="dialog-heading">
+          <div>
+            <span class="eyebrow">本机识别 · 人工确认</span>
+            <h2>截图 OCR 导入交易与股息</h2>
+          </div>
+          <button type="button" class="icon-button" data-close="ocrDialog" aria-label="关闭">×</button>
+        </div>
+        <div class="ocr-service-row">
+          <span class="ocr-status checking" id="ocrStatus">Umi-OCR ● 检测中</span>
+          <button type="button" class="table-action" id="ocrRetryButton">重新检测</button>
+          <span class="ocr-base-url" id="ocrBaseUrl">127.0.0.1:1224</span>
+        </div>
+        <p class="dialog-note privacy-note">图片只会发送到本机 Umi-OCR，不会上传互联网。识别结果不会自动写入；请校对后再确认导入。</p>
+
+        <input type="file" id="ocrFileInput" accept="image/png,image/jpeg,image/webp,image/bmp" multiple hidden />
+        <div class="ocr-upload-grid">
+          <button type="button" class="ocr-drop-zone" id="ocrDropZone">
+            <strong>拖入成交截图，或点击选择</strong>
+            <small>支持 PNG / JPG / WebP / BMP；多张图片将按顺序逐张识别</small>
+          </button>
+          <div class="ocr-preview" id="ocrPreview">
+            <span>尚未选择图片</span>
+            <img id="ocrPreviewImage" alt="待识别交易截图预览" hidden />
+          </div>
+        </div>
+        <p class="ocr-progress" id="ocrProgress" role="status">连接 Umi-OCR 后即可开始。</p>
+        <div class="ocr-result-heading" id="ocrResultHeading" hidden>
+          <div><strong>待导入记录</strong><small id="ocrResultSummary"></small></div>
+          <button type="button" class="table-action" id="ocrClearButton">清空结果</button>
+        </div>
+        <div class="table-wrap ocr-review-wrap" id="ocrReviewWrap" hidden>
+          <table class="ocr-review-table">
+            <thead><tr><th>导入</th><th>归属股票</th><th>时间</th><th>记录类型</th><th class="number">价格</th><th class="number">数量</th><th class="number">成交/股息金额</th><th>状态</th></tr></thead>
+            <tbody id="ocrReviewBody"></tbody>
+          </table>
+        </div>
+        <p class="form-error" id="ocrError" role="alert"></p>
+        <div class="dialog-actions">
+          <small class="ocr-confirm-hint" id="ocrConfirmHint">OCR 结果必须逐笔校对</small>
+          <span class="spacer"></span>
+          <button type="button" class="button ghost" data-close="ocrDialog">取消</button>
+          <button type="button" class="button primary" id="ocrConfirmButton" disabled>确认导入</button>
+        </div>
+      </div>
+    </dialog>
+
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
     <script src="engine.js"></script>
+    <script src="umi-ocr.js"></script>
+    <script src="trade-screenshot-parser.js"></script>
     <script src="app.js"></script>
   </body>
 </html>
